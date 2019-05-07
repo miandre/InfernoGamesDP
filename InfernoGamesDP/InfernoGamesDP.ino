@@ -13,6 +13,8 @@
 #include <Adafruit_FONA.h>
 #include <SoftwareSerial.h>
 #include <MemoryFree.h>
+#include "InfernoGamesDP.h"
+
 
 
 #define FONA_RX 4
@@ -23,10 +25,12 @@
 #define BLUE 1
 #define GREEN 2
 #define YELLOW 3
+#define NUMBER_OF_TEAMS 3
 
+#define NO_TEAM 99
 #define BEARS 0
 #define STF 1
-#define SOT 2
+#define SOR 2
 #define NA 3
 
 #define LED_COLOR_RED pixels.Color(255, 0, 0)
@@ -36,16 +40,12 @@
 #define LED_COLOR_WHITE pixels.Color(255, 255, 255)
 #define LED_COLOR_WHITE_LOW pixels.Color(25, 25, 25)
 
-
-
-#define NO_TEAM "BLACK"
-#define CAPTURE_TIMEOUT 10
-#define CONFIRM_TIMEOUT 10
 #define RED_BUTTON_PIN 2
 #define BLUE_BUTTON_PIN 3
 #define BUTTON_LED_PIN 9
 #define STATUS_CAPTURING 1
 #define STATUS_HOLDING 2
+#define READY_TIME 3
 
 
 #define ID 5
@@ -58,6 +58,7 @@
 #define NEO_PIN 12 
 // How many NeoPixels are attached to the Arduino?
 #define NUMPIXELS 8 
+
 Adafruit_NeoPixel pixels(NUMPIXELS, NEO_PIN, NEO_GRB + NEO_KHZ800);
 
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
@@ -69,26 +70,33 @@ byte pressed[NUMBUTTONS], justpressed[NUMBUTTONS], justreleased[NUMBUTTONS];
 byte previous_keystate[NUMBUTTONS], current_keystate[NUMBUTTONS];
 
 
+
 void initFONA();
 void trySendData(const String&, int8_t, boolean);
-void setStatus(const String&, uint8_t);
+void setStatus(uint8_t, uint8_t);
 void setAlive(boolean);
 void reInitGPRS();
-void blueButtonISR();
-void redButtonISR();
 void checkResetState();
 void reportStatusToWatchdog();
-void interpretResponse();
+//void interpretResponse();
 boolean sendData(const String&);
 
 enum State {
 	STANDBY,
 	READY,
 	NEUTRAL,
-	TAKEN
+	TAKEN,
+	END
+};
+
+struct TIME
+{
+	int8_t seconds;
+	int8_t minutes;
+	int8_t hours;
 };
 // this is a large buffer for replies
-char replybuffer[255];
+
 
 SoftwareSerial fonaSs = SoftwareSerial(FONA_TX, FONA_RX);
 SoftwareSerial *fonaSerial = &fonaSs;
@@ -96,24 +104,99 @@ Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 boolean fonaInitialized = false;
 
 volatile State state;
-String currentTeam = NO_TEAM;
+byte currentTeam = NO_TEAM;
 boolean standByModeIsSet = false;
-boolean statusHasChanged = false;
+boolean readyModeSet = false;
+boolean neutralModeSet = false;
+boolean goOnlineTimeIsSet = false;
 volatile boolean resetState = false;
 boolean resetReported = true;
 char PIN[5] = "1234";
-const char URL_BASE[43] = "http://www.geeks.terminalprospect.com/AIR/";
-long timer = 0;
-long loopTimer = 0;
+const String URL_BASE PROGMEM = "http://www.geeks.terminalprospect.com/AIR/";
+long score[NUMBER_OF_TEAMS];
+TIME startTime;
+TIME goOnline;
+TIME stopTime;
+uint32_t loopCounter = 0;
 
+const byte transmition[6][16] PROGMEM = {
+	// 'reception, 16x8px
+	{0b00000001, 0b00000010, 0b00000100, 0b11111111, 0b00000100, 0b00000010, 0b000000001,0b000000000,0b000000000,0b000000000,0b000000000,0b000000000,0b000000000,0b000000000, 0b000000000},
+	{0b00000001, 0b00000010, 0b00000100, 0b11111111, 0b00000100, 0b00000010, 0b011000001,0b000000000,0b000000000,0b000000000,0b000000000,0b000000000,0b000000000,0b000000000, 0b000000000},
+	{0b00000001, 0b00000010, 0b00000100, 0b11111111, 0b00000100, 0b00000010, 0b011000001,0b000000000,0b011100000,0b000000000,0b000000000,0b000000000,0b000000000,0b000000000, 0b000000000},
+	{0b00000001, 0b00000010, 0b00000100, 0b11111111, 0b00000100, 0b00000010, 0b011000001,0b000000000,0b011100000,0b000000000,0b011110000,0b000000000,0b000000000,0b000000000, 0b000000000},
+	{0b00000001, 0b00000010, 0b00000100, 0b11111111, 0b00000100, 0b00000010, 0b011000001,0b000000000,0b011100000,0b000000000,0b011110000,0b000000000,0b011111000,0b000000000, 0b000000000},
+	{0b00000001, 0b00000010, 0b00000100, 0b11111111, 0b00000100, 0b00000010, 0b011000001,0b000000000,0b011100000,0b000000000,0b011110000,0b000000000,0b011111000,0b000000000, 0b011111100}
+};
+
+
+const byte logo[] PROGMEM = {
+	// 'unnamed, 64x64px
+	0xff, 0xff, 0x03, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb,
+	0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0x7b, 0x3b,
+	0x3b, 0x3b, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb,
+	0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0xfb, 0x03, 0x03, 0xff,
+	0xff, 0xff, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 0x3f, 0x1f, 0x8f, 0xe3, 0xf1, 0xfc, 0xfe,
+	0xff, 0xfc, 0xf8, 0xf1, 0xc7, 0x1f, 0x3f, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xff,
+	0xff, 0xff, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0x7f, 0x1f, 0x87, 0xc3, 0xf1, 0xf8, 0xfc, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xf8, 0xe1, 0xc3, 0x8f, 0x1f, 0x7f, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xff,
+	0xff, 0xff, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x3f, 0x1f,
+	0x87, 0xe3, 0xf9, 0xfc, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xf8, 0xe1, 0xc7,
+	0x0f, 0x1f, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xff,
+	0xff, 0xff, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xcf, 0xe7, 0xf8, 0xfc, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xfe, 0xfe, 0xfc, 0xf3, 0xe7, 0xdf, 0xbf, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xff,
+	0xff, 0xff, 0x00, 0xff, 0xff, 0xff, 0xff, 0x7d, 0x79, 0x79, 0x79, 0xf9, 0xf9, 0xf9, 0xf9, 0xf9,
+	0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0x79, 0x39, 0x39, 0x39, 0x79, 0xf9, 0xf9, 0xf9, 0xf9,
+	0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0xf9, 0xfd, 0xf9, 0xfd, 0xfd,
+	0xfd, 0xfd, 0xfd, 0xfd, 0xfd, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xff,
+	0xff, 0xff, 0x00, 0xff, 0xff, 0xff, 0x7e, 0x3e, 0x3e, 0x00, 0x7e, 0x7e, 0x3d, 0x3d, 0x01, 0x31,
+	0x79, 0x3d, 0x01, 0x03, 0x3f, 0x39, 0x39, 0x00, 0x01, 0x39, 0xfe, 0xfe, 0xc3, 0x81, 0x21, 0x21,
+	0x21, 0x81, 0xe7, 0x39, 0x3d, 0x01, 0x01, 0x39, 0xf9, 0xf1, 0xff, 0x3d, 0x01, 0x31, 0x79, 0x3d,
+	0x01, 0x03, 0x3f, 0xc7, 0x01, 0x39, 0x39, 0x39, 0x81, 0xc3, 0xff, 0xff, 0xff, 0x00, 0x00, 0xff,
+	0xff, 0xff, 0x80, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f,
+	0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f,
+	0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f,
+	0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x80, 0xc0, 0xff
+};
+
+char messageContent[30];
+
+uint16_t getTimeDiffInMinutes(struct TIME stop, struct TIME start) {
+	return getTimeDiffInSeconds(stop, start) / 60;
+}
+
+uint16_t getTimeDiffInSeconds(struct TIME stop, struct TIME start) {
+	if (stop.seconds < start.seconds) {
+		--stop.minutes;
+		stop.seconds += 60;
+	}
+	if (stop.minutes < start.minutes) {
+		--stop.hours;
+		stop.minutes += 60;
+	}
+	if (stop.hours < start.hours) {
+		stop.hours += 24;
+	}
+
+	uint8_t hourDiff = stop.hours - start.hours;
+	uint8_t minDiff = stop.minutes - start.minutes;
+	uint8_t secDiff = stop.seconds - start.seconds;
+
+	return  ((hourDiff * 60 * 60) + (minDiff * 60) + secDiff);
+}
 
 void setupDisplay() {
 	lcd.begin();
 	lcd.clear();
 	lcd.setCursor(30, 3);
 	lcd.setFontSize(FONT_SIZE_XLARGE);
-	lcd.print("STARTED");
-	delay(1000);
 }
 
 void setupNeoPixelBar() {
@@ -125,7 +208,7 @@ void setupNeoPixelBar() {
 
 void setupButtons() {
 	for (byte i = 0; i < NUMBUTTONS; i++) {
-		pinMode(buttons[i], INPUT);
+		pinMode(buttons[i], INPUT_PULLUP);
 		digitalWrite(buttons[i], HIGH);
 	}
 	pinMode(BUTTON_LED_PIN, OUTPUT);
@@ -182,31 +265,31 @@ byte getPressedButton() {
 }
 
 void writeTeamLogoToDisplay(byte team) {
-	Serial.println("Writing team logo: " + team);
-	String displayText;
-	switch (team)
-	{
-	case BEARS:
-		displayText = F("BEARS");
-		break;
-	case NA:
-		displayText = F("N/A");
-		break;
-	case STF:
-		displayText = F("STF");
-		break;
-	case SOT:
-		displayText = F("SOT");
-		break;
-	}
+	String displayText = getTeamNameById(team);
 	lcd.clear();
 	lcd.setFontSize(FONT_SIZE_XLARGE);
 	lcd.setCursor((128 - (displayText.length() * 9)) / 2, 3);
 	lcd.println(displayText);
+	printSignalLevelToDisplay();
+}
+
+String getTeamNameById(const byte &team)
+{
+	switch (team)
+	{
+	case BEARS:
+		return F("BEARS");
+	case NA:
+		return F("N/A");
+		break;
+	case STF:
+		return F("STF");
+	case SOR:
+		return F("SOR");
+	}
 }
 
 void lightUpTeamColour(byte team) {
-	Serial.println("Seting Team Color: " + team);
 	uint32_t ledColor;
 	switch (team)
 	{
@@ -219,7 +302,7 @@ void lightUpTeamColour(byte team) {
 	case STF:
 		ledColor = LED_COLOR_BLUE;
 		break;
-	case SOT:
+	case SOR:
 		ledColor = LED_COLOR_GREEN;
 		break;
 	}
@@ -228,11 +311,11 @@ void lightUpTeamColour(byte team) {
 }
 
 
-byte getTeamIdFromName(String team) {
+byte getTeamIdFromName(const String& team) {
 	if (team.equalsIgnoreCase(F("BEARS"))) return BEARS;
 	if (team.equalsIgnoreCase(F("NONE"))) return NA;
 	if (team.equalsIgnoreCase(F("STF"))) return STF;
-	if (team.equalsIgnoreCase(F("SOT"))) return SOT;
+	if (team.equalsIgnoreCase(F("SOR"))) return SOR;
 }
 
 String getTeamColorFromId(byte team) {
@@ -247,8 +330,11 @@ String getTeamColorFromId(byte team) {
 	case STF:
 		return F("BLUE");
 		break;
-	case SOT:
+	case SOR:
 		return F("GREEN");
+		break;
+	case NO_TEAM:
+		return F("BLACK");
 		break;
 	}
 }
@@ -259,100 +345,142 @@ void writeStatusTextToDisplay(String displayText) {
 }
 
 
-void handleButtons(byte pressedButton) {
-	noTone(8);
-	tone(8, 523, 100);
-	switch (pressedButton)
-	{
-	case RED:
-		setTakenMode(BEARS);
-		break;
-	case YELLOW:
-		setTakenMode(NA);
-		break;
-	case BLUE:
-		setTakenMode(STF);
-		break;
-	case GREEN:
-		setTakenMode(SOT);
-		break;
-	}
+void handleButtons(byte pressedButton, byte currentTeam) {
+	noTone(2);
+	tone(2, 440, 300);
 
+	if (pressedButton != currentTeam) {
+		switch (pressedButton)
+		{
+		case RED:
+			setTakenMode(BEARS);
+			break;
+		case YELLOW:
+			setTakenMode(NA);
+			break;
+		case BLUE:
+			setTakenMode(STF);
+			break;
+		case GREEN:
+			setTakenMode(SOR);
+			break;
+		}
+	}
 }
 
 boolean checkForSMS(char *smsbuff) {
 	if (fonaInitialized) {
 		char fonaInBuffer[64];
 		char* bufPtr = fonaInBuffer;    //handy buffer pointer
+		if (fona.available()) {     //any data available from the FONA?
+			uint8_t slot = 0;            //this will be the slot number of the SMS
+			uint8_t charCount = 0;
 
-		if (fona.available())      //any data available from the FONA?
-		{
-			int slot = 0;            //this will be the slot number of the SMS
-			int charCount = 0;
-			//Read the notification into fonaInBuffer
-			do {
-				*bufPtr = fona.read();
-				Serial.write(*bufPtr);
-				delay(1);
-			} while ((*bufPtr++ != '\n') && (fona.available()) && (++charCount < (sizeof(fonaInBuffer) - 1)));
+			if ((state == STANDBY) || (state == READY)) {  //Because of junk in the buffer we need 2 versions.
+				uint8_t sanityCheck = 0;  // use to avoud inifinite loop
+				do {
+					*bufPtr = fona.read();
+					Serial.write(*bufPtr);
+				} while ((*bufPtr != '+') && (++sanityCheck < 255));
+
+				while ((*bufPtr++ != '\n') && (fona.available()) && (++charCount < (sizeof(fonaInBuffer) - 1))) {
+					*bufPtr = fona.read();
+					Serial.write(*bufPtr);
+					delay(1);
+				}
+			}
+			else {
+				do {
+					*bufPtr = fona.read();
+					Serial.write(*bufPtr);
+					delay(1);
+				} while ((*bufPtr++ != '\n') && (fona.available()) && (++charCount < (sizeof(fonaInBuffer) - 1)));
+			}
 
 			//Add a terminal NULL to the notification string
 			*bufPtr = 0;
 
+			uint16_t smslen;
+
 			//Scan the notification string for an SMS received notification.
 			//  If it's an SMS message, we'll get the slot number in 'slot'
 			if (1 == sscanf(fonaInBuffer, "+CMTI: \"SM\",%d", &slot)) {
-				uint16_t smslen;
-				if (!fona.readSMS(slot, smsbuff, 31, &smslen)) {
+				if (fona.readSMS(slot, smsbuff, 40, &smslen)) {
+					fona.deleteSMS(slot);
+					return true;
 				}
-				if (fona.deleteSMS(slot)) {
-
-				}
-				return true;
 			}
 		}
 	}
 	return false;
 }
 
+
+TIME getTime() {
+	TIME currentTime;
+	char buffer[23];
+	fona.getTime(buffer, 23);
+	String time = String(buffer);
+	currentTime.hours = time.substring(10, 12).toInt();
+	currentTime.minutes = time.substring(13, 15).toInt();
+	currentTime.seconds = time.substring(16, 18).toInt();
+	return currentTime;
+}
+
+
+void setGoOnlineAndStopTime(const String& onlineTime) {
+	if (onlineTime.length() >= 8) {
+		uint8_t hours = onlineTime.substring(0, 2).toInt();
+		uint8_t minutes = onlineTime.substring(3, 5).toInt();
+		uint8_t seconds = onlineTime.substring(6, 8).toInt();
+		goOnline.hours = hours;
+		goOnline.minutes = minutes;
+		goOnline.seconds = seconds;
+		stopTime.hours = hours;
+		stopTime.minutes = minutes + 2;
+		stopTime.seconds = seconds;
+		goOnlineTimeIsSet = true;
+	}
+}
+
 void handleMessage(char *smsbuff) {
 	String message = String(smsbuff);
-
 	if (message.startsWith(F("STANDBY"))) {
-		setStandbyMode();
+		setStandbyMode(message.substring(8));
 	}
 	else if (message.startsWith(F("READY"))) {
-		state = READY;
+		setReadyMode(message.substring(6));
 	}
 	else if (message.startsWith(F("NEUTRAL"))) {
-		reportStatusToWatchdog();
 		setNeutralMode();
 	}
 	else if (message.startsWith(F("TAKEN"))) {
-		currentTeam = message.substring(6);
-		byte team = getTeamIdFromName(currentTeam);
-
-		setTakenMode(team);
+		currentTeam = getTeamIdFromName(message.substring(6));
+		setTakenMode(currentTeam);
 	}
 }
+
 
 void displayTransmittingText() {
 	lcd.setFontSize(FONT_SIZE_SMALL);
 	lcd.setCursor(0, 6);
-	lcd.println("Sending Data");
-	lcd.print("Please stand by...");
+	lcd.println(F("Transmitting data..."));
+	lcd.print(F("Please stand by..."));
 }
 
 void removeTransmittingText() {
 	lcd.setFontSize(FONT_SIZE_SMALL);
-	lcd.setCursor(0,6);
-	lcd.println("                    ");
-	lcd.print("                     ");
+	lcd.setCursor(0, 6);
+	lcd.println(F("                     "));
+	lcd.print(F("                   "));
+	printSignalLevelToDisplay();
 }
 
-void setStandbyMode() {
+void setStandbyMode(const String& onlineTime) {
 	state = STANDBY;
-	lcd.backlight(false);
+	standByModeIsSet = true;
+	setGoOnlineAndStopTime(onlineTime);
+	delay(50);
 	lcd.clear();
 	pixels.clear();
 	pixels.show();
@@ -360,15 +488,42 @@ void setStandbyMode() {
 	standByModeIsSet = true;
 }
 
+void setReadyMode(const String& onlineTime) {
+	state = READY;
+	setGoOnlineAndStopTime(onlineTime);
+	delay(50);
+	lcd.clear();
+	pixels.clear();
+	pixels.show();
+	digitalWrite(BUTTON_LED_PIN, LOW);
+}
+
 void setNeutralMode() {
 	state = NEUTRAL;
+	setStatus(NO_TEAM, 2);
 	lcd.backlight(true);
+	lcd.clear();
+	lcd.setCursor(32, 0);
+	lcd.draw(logo, 64, 64);
+	printSignalLevelToDisplay();
 	digitalWrite(BUTTON_LED_PIN, HIGH);
 	pixels.fill(LED_COLOR_WHITE_LOW, 0, 8);
 	pixels.show();
 }
 
 void setTakenMode(byte team) {
+	TIME time = getTime();
+	uint16_t timeCaptured = getTimeDiffInSeconds(time, startTime);
+
+	if (currentTeam != NO_TEAM) {
+		score[currentTeam] += timeCaptured;
+	}
+	else {
+		setStartTime(getTime());
+	}
+
+	startTime = time;
+	currentTeam = team;
 	state = TAKEN;
 	lcd.backlight(true);
 	digitalWrite(BUTTON_LED_PIN, LOW);
@@ -376,14 +531,40 @@ void setTakenMode(byte team) {
 	lightUpTeamColour(team);
 	delay(50);
 	displayTransmittingText();
-	delay(500);
-	setStatus(getTeamColorFromId(team));
-	delay(500);
+
+	setStatus(team, 2);
+
 	removeTransmittingText();
 	digitalWrite(BUTTON_LED_PIN, HIGH);
+	//for (uint8_t i = 0; i < 4; i++) {
+	//	Serial.print(getTeamColorFromId(i) + " ");
+	//	Serial.println(score[i]);
+	//}
 }
 
+void setStartTime(TIME now) {
+	startTime.hours = now.hours;
+	startTime.minutes = now.minutes;
+	startTime.seconds = now.seconds;
+}
 
+void printSignalLevelToDisplay() {
+	uint8_t n = fona.getRSSI();
+
+	if (n == 0) {
+		lcd.setCursor(0, 0);
+		lcd.draw(transmition[0], 16, 8);
+	}
+	if ((n == 1) || (n == 2)) {
+		lcd.setCursor(0, 0);
+		lcd.draw(transmition[1], 16, 8);
+	}
+	if ((n >= 3) && (n <= 31)) {
+		byte i = map(n, 2, 31, 2, 5);
+		lcd.setCursor(0, 0);
+		lcd.draw(transmition[i], 16, 8);
+	}
+}
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
@@ -393,48 +574,97 @@ void setTakenMode(byte team) {
 *********************************    SETUP    **************************************
 ************************************************************************************/
 void setup() {
-	while (!Serial);
 	Serial.begin(115200);
 	delay(100);
 	setupDisplay();
 	setupNeoPixelBar();
 	setupButtons();
 	digitalWrite(BUTTON_LED_PIN, HIGH);
-	state = NEUTRAL;
+	state = STANDBY;
 	delay(100);
-	initFONA();
+	initFONA(true);
+	lcd.clear();
+	lcd.setCursor(0, 0);
+	lcd.draw(transmition[0], 7, 8);
+	printSignalLevelToDisplay();
 }
 
 /**********************************************************************************
 ****************************    MAIN PROGRAM    ***********************************
 ************************************************************************************/
 void loop() {
-	char messageContent[10];
 	Serial.print(F("freeMemory()="));
 	Serial.println(freeMemory());
-	lcd.clear();
-	writeStatusTextToDisplay(F("LOOPING"));
+	
 	while (1) {
+		noTone(2);
 		if (checkForSMS(messageContent)) {
 			handleMessage(messageContent);
 		}
-
+		uint16_t timeLeft = 0;
 		switch (state) {
 		case STANDBY:
-			if (!standByModeIsSet) { setStandbyMode(); }
+			if (!standByModeIsSet) {
+				setStandbyMode("");
+			}
+			//if (loopCounter++ > 200000) {
+				printSignalLevelToDisplay();
+				if (goOnlineTimeIsSet && getTimeDiffInMinutes(goOnline, getTime()) < READY_TIME) {
+					state = READY;
+				}
+				delay(5000);
+				//loopCounter = 0;
+			//}
 			break;
 		case READY:
+			timeLeft = getTimeDiffInMinutes(goOnline, getTime());
+			if (!readyModeSet && timeLeft <= READY_TIME) {
+				setStatus(NO_TEAM, 1);
+				readyModeSet = true;
+			}
+			if (timeLeft < 1) {
+				setNeutralMode();
+				break;
+			}
+			lcd.clear();
+			lcd.setCursor(0, 4);
+			lcd.setFontSize(FONT_SIZE_SMALL);
+			lcd.print(F("Online in "));
+			lcd.printInt(timeLeft);
+			lcd.print(F(" minutes"));
+			printSignalLevelToDisplay();
+			delay(10000);
 			break;
 		case NEUTRAL:
-			handleButtons(getPressedButton());
+			handleButtons(getPressedButton(), NO_TEAM);
 			break;
 		case TAKEN:
-			handleButtons(getPressedButton());
+			handleButtons(getPressedButton(), currentTeam);
+			if (++loopCounter > 50000) {
+				if (getTimeDiffInMinutes(stopTime, getTime()) < 1)
+					state = END;
+				loopCounter = 0;
+			}
+			break;
+		case END:
+			lcd.clear();
+			lcd.setCursor(0, 0);
+			lcd.setFontSize(FONT_SIZE_SMALL);
+			for (uint8_t team = 0; team < NUMBER_OF_TEAMS; team++) {
+				lcd.print(getTeamNameById(team) + " ");
+				lcd.printLong(score[team]);
+			}
+			while (1) {
+				delay(5000);
+				if (checkForSMS(messageContent)) {
+					handleMessage(messageContent);
+				}
+			}
 			break;
 		}
+		//counter++;
 	}
 }
-
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
@@ -452,41 +682,39 @@ void reportStatusToWatchdog() {
 
 	checkResetState();
 	if (state == NEUTRAL && !resetReported) {
-		setStatus(NO_TEAM);
+		setStatus(NO_TEAM, 2);
 		resetReported = true;
 	}
 	else {
 		setAlive(true);
 	}
-	timer = 0;
-	loopTimer = millis();
 }
 
-void interpretResponse()
-{
-	String buffer(replybuffer);
-	if (buffer.startsWith(String('#'))) {
-		uint8_t teamEnd = buffer.indexOf('*');
-		uint8_t statusStart = teamEnd + 1;
-		String team = buffer.substring(1, teamEnd);
-		uint8_t status = buffer.substring(statusStart, statusStart + 1).toInt();
-
-		switch (status) {
-		case 2:
-			if (team.equals(F("BLUE"))) {
-				state = TAKEN;
-			}
-			else if (team.equals(F("RED"))) {
-				state = TAKEN;
-			}
-			else {
-				state = NEUTRAL;
-			}
-			break;
-		}
-		memset(replybuffer, 0, sizeof(replybuffer));
-	}
-}
+//void interpretResponse()
+//{
+//	String buffer(replybuffer);
+//	if (buffer.startsWith(String('#'))) {
+//		uint8_t teamEnd = buffer.indexOf('*');
+//		uint8_t statusStart = teamEnd + 1;
+//		String team = buffer.substring(1, teamEnd);
+//		uint8_t status = buffer.substring(statusStart, statusStart + 1).toInt();
+//
+//		switch (status) {
+//		case 2:
+//			if (team.equals(F("BLUE"))) {
+//				state = TAKEN;
+//			}
+//			else if (team.equals(F("RED"))) {
+//				state = TAKEN;
+//			}
+//			else {
+//				state = NEUTRAL;
+//			}
+//			break;
+//		}
+//		memset(replybuffer, 0, sizeof(replybuffer));
+//	}
+//}
 
 void flushFONA() {
 	flushSerial();
@@ -496,29 +724,29 @@ void flushFONA() {
 	fona.flush();
 }
 
-void initFONA() {
+void initFONA(boolean startup) {
 	lcd.clear();
 	lcd.setCursor(0, 0);
-	writeStatusTextToDisplay(F("Initializing"));
+	if (startup) { writeStatusTextToDisplay(F("Initializing")); }
 
 	fonaSerial->begin(4800);
 	if (!fona.begin(*fonaSerial)) {
 		while (true);
 	}
-	writeStatusTextToDisplay(F("GSM Module Found"));
+	if (startup) { writeStatusTextToDisplay(F("GSM Module Found")); }
 
+	flushFONA();
 	// Optionally configure a GPRS APN, username, and password.
 	fona.setGPRSNetworkSettings(F(APN));
 
 
-	flushFONA();
 	while (!fona.unlockSIM(PIN)) {
 		delay(100);
 
 		if (fona.getNetworkStatus() == 1)
 			break;
 	}
-	writeStatusTextToDisplay(F("SIM OK"));
+	if (startup) { writeStatusTextToDisplay(F("SIM OK")); }
 
 	flushFONA();
 
@@ -536,9 +764,9 @@ void initFONA() {
 
 	flushFONA();
 
-	writeStatusTextToDisplay(F("Network Found"));
+	if (startup) { writeStatusTextToDisplay(F("Network Found")); }
 	fona.enableGPRS(false);
-	delay(100);
+	delay(1000);
 	while (!fona.enableGPRS(true)) {
 
 		delay(200);
@@ -546,61 +774,68 @@ void initFONA() {
 	flushFONA();
 	fonaInitialized = true;
 
+	if (startup) {
+
+		for (int i = 0; i < 3; i++) {
+			fona.deleteSMS(i);
+		}
+	}
+
 	//TESTING RTC! WORKS!"
 	fona.enableRTC(1);
-	if (!fona.enableNetworkTimeSync(true)) {
-		Serial.println(F("Failed to enable"));
-	}
-	char buffer[23];
-	fona.getTime(buffer, 23);
-	writeStatusTextToDisplay(buffer);
-	Serial.println("Time: " + String(buffer));
+	fona.enableNetworkTimeSync(true);
 	// END RTC
-	writeStatusTextToDisplay(F("GSM init Finished"));
 
+	if (startup) { writeStatusTextToDisplay(F("GSM init Finished")); }
+
+	flushFONA();
 }
 
 void reInitGPRS() {
 	fona.enableGPRS(false);
-	delay(100);
+	delay(400);
 	fona.enableGPRS(true);
-	delay(200);
+	delay(1000);
 }
 
-void setStatus(const String& team) {
-	const String url = String(URL_BASE) + F("UpdateStatus.php?ID=") + ID + F("&TEAM=") + team + F("&STATUS=2");
+void setStatus(uint8_t teamId, uint8_t status) {
+	String team = getTeamColorFromId(teamId);
+	const String url = URL_BASE + F("UpdateStatus.php?ID=") + ID + F("&TEAM=") + team + F("&STATUS=") + status;
+	Serial.println(url);
 	trySendData(url, 5, true);
 }
 
 void setAlive(boolean tryToReboot) {
-	const String url = String(URL_BASE) + F("watchDog.php?ID=") + ID;
-	//const String url = "http://www.geeks.terminalprospect.com/AIR/watchDog.php?ID=5";
-	Serial.println(url);
+	const String url = URL_BASE + F("watchDog.php?ID=") + ID;
 	trySendData(url, 2, tryToReboot);
-	interpretResponse();
+	//interpretResponse();
 }
 
 void trySendData(const String& url, int8_t numberOfRetries, boolean tryToReboot) {
-	fona.enableGPRS(true);
+	digitalWrite(LED_BUILTIN, LOW);
+	//fona.enableGPRS(true);
 	delay(200);
 
 	int8_t reInitCounter = numberOfRetries;
 	while (!sendData(url)) {
 		reInitGPRS();
-		if (--reInitCounter <= 0 && tryToReboot) {
-			initFONA();
+		if (--reInitCounter >= 0 && tryToReboot) {
+			initFONA(false);
 			delay(1000);
-			reInitCounter = numberOfRetries;
+			//reInitCounter = numberOfRetries;
 		}
-		else { break; }
+		else {
+			break;
+		}
 	}
 
 	digitalWrite(LED_BUILTIN, HIGH);
-	fona.enableGPRS(false);
+	//fona.enableGPRS(false);
 }
 
 
 boolean sendData(const String& url) {
+	char replybuffer[255];
 	uint16_t statuscode;
 	int16_t length;
 	uint8_t i = 0;
@@ -612,7 +847,7 @@ boolean sendData(const String& url) {
 	fona.flush();
 
 	if (!fona.HTTP_GET_start(urlToSend, &statuscode, reinterpret_cast<uint16_t *>(&length))) {
-		//Serial.println("Failed! sendding");
+		//Serial.println(F("Failed! sendding"));
 		fona.flush();
 		return false;
 	}
@@ -632,13 +867,12 @@ boolean sendData(const String& url) {
 			if (!length) break;
 		}
 	}
-	//Serial.println(F("\n****"));
+
 	fona.HTTP_GET_end();
 
 	fona.flush();
-	statusHasChanged = false;
 
-	return true;
+	return statuscode == 200;
 
 }
 
