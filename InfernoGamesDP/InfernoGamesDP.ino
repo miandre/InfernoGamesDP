@@ -113,11 +113,23 @@ volatile boolean resetState = false;
 boolean resetReported = true;
 char PIN[5] = "1234";
 const String URL_BASE PROGMEM = "http://www.geeks.terminalprospect.com/AIR/";
-long score[NUMBER_OF_TEAMS];
+uint16_t score[NUMBER_OF_TEAMS];
 TIME startTime;
 TIME goOnline;
 TIME stopTime;
 uint32_t loopCounter = 0;
+
+const String PROGMEM stf = "STF";
+const String PROGMEM bears = "BEARS";
+const String PROGMEM sor = "SOR";
+
+const String PROGMEM red = "RED";
+const String PROGMEM blue = "BLUE";
+const String PROGMEM green = "GREEN";
+const String PROGMEM black = "BLACK";
+
+String globalTeamName;
+String globalTeamColor;
 
 const byte transmition[6][16] PROGMEM = {
 	// 'reception, 16x8px
@@ -265,27 +277,27 @@ byte getPressedButton() {
 }
 
 void writeTeamLogoToDisplay(byte team) {
-	String displayText = getTeamNameById(team);
+	setGlobalTeamString(team);
 	lcd.clear();
 	lcd.setFontSize(FONT_SIZE_XLARGE);
-	lcd.setCursor((128 - (displayText.length() * 9)) / 2, 3);
-	lcd.println(displayText);
+	lcd.setCursor((128 - (globalTeamName.length() * 9)) / 2, 3);
+	lcd.println(globalTeamName);
 	printSignalLevelToDisplay();
 }
 
-String getTeamNameById(const byte &team)
+void setGlobalTeamString(const byte &team)
 {
 	switch (team)
 	{
 	case BEARS:
-		return F("BEARS");
-	case NA:
-		return F("N/A");
+		globalTeamName = bears;
 		break;
 	case STF:
-		return F("STF");
+		globalTeamName = stf;
+		break;
 	case SOR:
-		return F("SOR");
+		globalTeamName = sor;
+		break;
 	}
 }
 
@@ -312,29 +324,25 @@ void lightUpTeamColour(byte team) {
 
 
 byte getTeamIdFromName(const String& team) {
-	if (team.equalsIgnoreCase(F("BEARS"))) return BEARS;
-	if (team.equalsIgnoreCase(F("NONE"))) return NA;
-	if (team.equalsIgnoreCase(F("STF"))) return STF;
-	if (team.equalsIgnoreCase(F("SOR"))) return SOR;
+	if (team.equalsIgnoreCase(bears)) return BEARS;
+	if (team.equalsIgnoreCase(stf)) return STF;
+	if (team.equalsIgnoreCase(sor)) return SOR;
 }
 
-String getTeamColorFromId(byte team) {
+void setCurrentTeamColor(byte team) {
 	switch (team)
 	{
 	case BEARS:
-		return F("RED");
-		break;
-	case NA:
-		return F("YELLOW");
+		globalTeamColor = red;
 		break;
 	case STF:
-		return F("BLUE");
+		globalTeamColor = blue;
 		break;
 	case SOR:
-		return F("GREEN");
+		globalTeamColor = green;
 		break;
 	case NO_TEAM:
-		return F("BLACK");
+		globalTeamColor = black;
 		break;
 	}
 }
@@ -436,11 +444,16 @@ void setGoOnlineAndStopTime(const String& onlineTime) {
 		goOnline.hours = hours;
 		goOnline.minutes = minutes;
 		goOnline.seconds = seconds;
-		stopTime.hours = hours;
-		stopTime.minutes = minutes + 2;
-		stopTime.seconds = seconds;
+		setStopTime(hours, (minutes +1), seconds);
 		goOnlineTimeIsSet = true;
 	}
+}
+
+void setStopTime(const uint8_t &hours, const uint8_t &minutes, const uint8_t &seconds)
+{
+	stopTime.hours = hours;
+	stopTime.minutes = minutes;
+	stopTime.seconds = seconds;
 }
 
 void handleMessage(char *smsbuff) {
@@ -457,6 +470,13 @@ void handleMessage(char *smsbuff) {
 	else if (message.startsWith(F("TAKEN"))) {
 		currentTeam = getTeamIdFromName(message.substring(6));
 		setTakenMode(currentTeam);
+	}
+	else if (message.startsWith(F("STOP"))) {
+		String time = message.substring(5);
+		uint8_t hours = time.substring(0, 2).toInt();
+		uint8_t minutes = time.substring(3, 5).toInt();
+		uint8_t seconds = time.substring(6, 8).toInt();
+		setStopTime(hours, minutes, seconds);
 	}
 }
 
@@ -536,11 +556,43 @@ void setTakenMode(byte team) {
 
 	removeTransmittingText();
 	digitalWrite(BUTTON_LED_PIN, HIGH);
-	//for (uint8_t i = 0; i < 4; i++) {
-	//	Serial.print(getTeamColorFromId(i) + " ");
-	//	Serial.println(score[i]);
-	//}
+
 }
+
+void setEndMode() {
+	TIME time = getTime();
+	uint16_t timeCaptured = getTimeDiffInSeconds(time, startTime);
+
+	if (currentTeam != NO_TEAM) {
+		score[currentTeam] += timeCaptured;
+	}
+
+	digitalWrite(BUTTON_LED_PIN, LOW);
+	setResult();
+}
+
+void setResult() {
+	lcd.clear();
+
+	byte maxIndex = 0;
+	uint16_t maxValue = score[maxIndex];
+	for (byte i = 1; i < NUMBER_OF_TEAMS; i++) {
+		Serial.print(i);
+		Serial.print(" ");
+		Serial.println(score[i]);
+		if (score[i] > maxValue) {
+			maxValue = score[i];
+			maxIndex = i;
+		}
+	}
+	writeTeamLogoToDisplay(maxIndex);
+	lightUpTeamColour(maxIndex);
+	lcd.setCursor(0, 6);
+	lcd.setFontSize(FONT_SIZE_SMALL);
+	lcd.printInt(maxValue);
+	lcd.print(F(" Points"));
+}
+
 
 void setStartTime(TIME now) {
 	startTime.hours = now.hours;
@@ -576,17 +628,21 @@ void printSignalLevelToDisplay() {
 void setup() {
 	Serial.begin(115200);
 	delay(100);
+	globalTeamName.reserve(6);
+	globalTeamColor.reserve(6);
 	setupDisplay();
 	setupNeoPixelBar();
 	setupButtons();
 	digitalWrite(BUTTON_LED_PIN, HIGH);
-	state = STANDBY;
 	delay(100);
 	initFONA(true);
 	lcd.clear();
 	lcd.setCursor(0, 0);
-	lcd.draw(transmition[0], 7, 8);
 	printSignalLevelToDisplay();
+
+	/*	Define Startup-State here: */
+	setNeutralMode();
+	/********************************/
 }
 
 /**********************************************************************************
@@ -595,7 +651,7 @@ void setup() {
 void loop() {
 	Serial.print(F("freeMemory()="));
 	Serial.println(freeMemory());
-	
+
 	while (1) {
 		noTone(2);
 		if (checkForSMS(messageContent)) {
@@ -608,13 +664,13 @@ void loop() {
 				setStandbyMode("");
 			}
 			//if (loopCounter++ > 200000) {
-				printSignalLevelToDisplay();
-				if (goOnlineTimeIsSet && getTimeDiffInMinutes(goOnline, getTime()) < READY_TIME) {
-					state = READY;
-				}
-				delay(5000);
-				//loopCounter = 0;
-			//}
+			printSignalLevelToDisplay();
+			if (goOnlineTimeIsSet && getTimeDiffInMinutes(goOnline, getTime()) < READY_TIME) {
+				state = READY;
+			}
+			delay(5000);
+			//loopCounter = 0;
+		//}
 			break;
 		case READY:
 			timeLeft = getTimeDiffInMinutes(goOnline, getTime());
@@ -637,6 +693,11 @@ void loop() {
 			break;
 		case NEUTRAL:
 			handleButtons(getPressedButton(), NO_TEAM);
+			if (++loopCounter > 50000) {
+				if (getTimeDiffInMinutes(stopTime, getTime()) < 1)
+					state = END;
+				loopCounter = 0;
+			}
 			break;
 		case TAKEN:
 			handleButtons(getPressedButton(), currentTeam);
@@ -647,22 +708,18 @@ void loop() {
 			}
 			break;
 		case END:
-			lcd.clear();
-			lcd.setCursor(0, 0);
-			lcd.setFontSize(FONT_SIZE_SMALL);
-			for (uint8_t team = 0; team < NUMBER_OF_TEAMS; team++) {
-				lcd.print(getTeamNameById(team) + " ");
-				lcd.printLong(score[team]);
-			}
+			setEndMode();
 			while (1) {
 				delay(5000);
+				Serial.println(F("X"));
 				if (checkForSMS(messageContent)) {
 					handleMessage(messageContent);
+					Serial.println(F("Y"));
+					break;
 				}
 			}
 			break;
 		}
-		//counter++;
 	}
 }
 
@@ -799,8 +856,8 @@ void reInitGPRS() {
 }
 
 void setStatus(uint8_t teamId, uint8_t status) {
-	String team = getTeamColorFromId(teamId);
-	const String url = URL_BASE + F("UpdateStatus.php?ID=") + ID + F("&TEAM=") + team + F("&STATUS=") + status;
+	setCurrentTeamColor(teamId);
+	const String url = URL_BASE + F("UpdateStatus.php?ID=") + ID + F("&TEAM=") + globalTeamColor + F("&STATUS=") + status;
 	Serial.println(url);
 	trySendData(url, 5, true);
 }
