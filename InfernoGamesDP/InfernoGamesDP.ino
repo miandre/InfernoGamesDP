@@ -119,14 +119,16 @@ TIME goOnline;
 TIME stopTime;
 uint32_t loopCounter = 0;
 
-const String PROGMEM stf = "STF";
-const String PROGMEM bears = "BEARS";
-const String PROGMEM sor = "SOR";
+#define FS(x) (__FlashStringHelper*)(x)
+const char stf[]  PROGMEM = { "STF" };
+const char bears[]  PROGMEM = { "BEARS" };
+const char sor[]  PROGMEM = { "SoR" };
 
-const String PROGMEM red = "RED";
-const String PROGMEM blue = "BLUE";
-const String PROGMEM green = "GREEN";
-const String PROGMEM black = "BLACK";
+const char PROGMEM red[] = { "RED" };
+const char PROGMEM blue[] = { "BLUE" };
+const char PROGMEM green[] = { "GREEN" };
+const char PROGMEM black[] = { "BLACK" };
+
 
 String globalTeamName;
 String globalTeamColor;
@@ -290,13 +292,13 @@ void setGlobalTeamString(const byte &team)
 	switch (team)
 	{
 	case BEARS:
-		globalTeamName = bears;
+		globalTeamName = FS(bears);
 		break;
 	case STF:
-		globalTeamName = stf;
+		globalTeamName = FS(stf);
 		break;
 	case SOR:
-		globalTeamName = sor;
+		globalTeamName = FS(sor);
 		break;
 	}
 }
@@ -324,25 +326,25 @@ void lightUpTeamColour(byte team) {
 
 
 byte getTeamIdFromName(const String& team) {
-	if (team.equalsIgnoreCase(bears)) return BEARS;
-	if (team.equalsIgnoreCase(stf)) return STF;
-	if (team.equalsIgnoreCase(sor)) return SOR;
+	if (team.equalsIgnoreCase(FS(bears))) return BEARS;
+	if (team.equalsIgnoreCase(FS(stf))) return STF;
+	if (team.equalsIgnoreCase(FS(sor))) return SOR;
 }
 
 void setCurrentTeamColor(byte team) {
 	switch (team)
 	{
 	case BEARS:
-		globalTeamColor = red;
+		globalTeamColor = FS(red);
 		break;
 	case STF:
-		globalTeamColor = blue;
+		globalTeamColor = FS(blue);
 		break;
 	case SOR:
-		globalTeamColor = green;
+		globalTeamColor = FS(green);
 		break;
 	case NO_TEAM:
-		globalTeamColor = black;
+		globalTeamColor = FS(black);
 		break;
 	}
 }
@@ -444,7 +446,7 @@ void setGoOnlineAndStopTime(const String& onlineTime) {
 		goOnline.hours = hours;
 		goOnline.minutes = minutes;
 		goOnline.seconds = seconds;
-		setStopTime(hours, (minutes +1), seconds);
+		setStopTime(hours, (minutes + 1), seconds);
 		goOnlineTimeIsSet = true;
 	}
 }
@@ -859,6 +861,8 @@ void setStatus(uint8_t teamId, uint8_t status) {
 	setCurrentTeamColor(teamId);
 	const String url = URL_BASE + F("UpdateStatus.php?ID=") + ID + F("&TEAM=") + globalTeamColor + F("&STATUS=") + status;
 	Serial.println(url);
+	Serial.print(F("freeMemory()="));
+	Serial.println(freeMemory());
 	trySendData(url, 5, true);
 }
 
