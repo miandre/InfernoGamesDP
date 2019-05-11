@@ -618,7 +618,15 @@ void printSignalLevelToDisplay() {
 		lcd.setCursor(0, 0);
 		lcd.draw(transmition[i], 16, 8);
 	}
+
 }
+
+void resetScore() {
+	for (byte i = 1; i < NUMBER_OF_TEAMS; i++) {
+		score[i] = 0;
+	}
+}
+
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
@@ -711,6 +719,7 @@ void loop() {
 			break;
 		case END:
 			setEndMode();
+			resetScore();
 			while (1) {
 				delay(5000);
 				Serial.println(F("X"));
