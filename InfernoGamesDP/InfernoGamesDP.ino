@@ -99,7 +99,7 @@ struct TIME
 
 
 SoftwareSerial fonaSs = SoftwareSerial(FONA_TX, FONA_RX);
-SoftwareSerial *fonaSerial = &fonaSs;
+SoftwareSerial* fonaSerial = &fonaSs;
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 boolean fonaInitialized = false;
 
@@ -127,7 +127,18 @@ const char sor[]  PROGMEM = { "SoR" };
 const char PROGMEM red[] = { "RED" };
 const char PROGMEM blue[] = { "BLUE" };
 const char PROGMEM green[] = { "GREEN" };
-const char PROGMEM black[] = { "BLACK" };
+const char PROGMEM black[] = { "BLACK" };;
+
+const char PROGMEM initializing[] = { "Initializing" };
+const char PROGMEM simOk[] = { "SIM OK" };
+const char PROGMEM gsmFound[] = { "GSM module found" };
+const char PROGMEM networkFound[] = { "Network found" };
+
+const char PROGMEM statusURL[] = { "UpdateStatus.php?ID=" };
+const char PROGMEM teamQuery[] = { "&TEAM=" };
+const char PROGMEM statusQuery[] = { "&STATUS=" };
+const char PROGMEM watchdogURL[] = { "watchDog.php?ID=" };
+
 
 
 String globalTeamName;
@@ -287,7 +298,7 @@ void writeTeamLogoToDisplay(byte team) {
 	printSignalLevelToDisplay();
 }
 
-void setGlobalTeamString(const byte &team)
+void setGlobalTeamString(const byte & team)
 {
 	switch (team)
 	{
@@ -325,7 +336,7 @@ void lightUpTeamColour(byte team) {
 }
 
 
-byte getTeamIdFromName(const String& team) {
+byte getTeamIdFromName(const String & team) {
 	if (team.equalsIgnoreCase(FS(bears))) return BEARS;
 	if (team.equalsIgnoreCase(FS(stf))) return STF;
 	if (team.equalsIgnoreCase(FS(sor))) return SOR;
@@ -378,7 +389,7 @@ void handleButtons(byte pressedButton, byte currentTeam) {
 	}
 }
 
-boolean checkForSMS(char *smsbuff) {
+boolean checkForSMS(char* smsbuff) {
 	if (fonaInitialized) {
 		char fonaInBuffer[64];
 		char* bufPtr = fonaInBuffer;    //handy buffer pointer
@@ -438,7 +449,7 @@ TIME getTime() {
 }
 
 
-void setGoOnlineAndStopTime(const String& onlineTime) {
+void setGoOnlineAndStopTime(const String & onlineTime) {
 	if (onlineTime.length() >= 8) {
 		uint8_t hours = onlineTime.substring(0, 2).toInt();
 		uint8_t minutes = onlineTime.substring(3, 5).toInt();
@@ -451,14 +462,14 @@ void setGoOnlineAndStopTime(const String& onlineTime) {
 	}
 }
 
-void setStopTime(const uint8_t &hours, const uint8_t &minutes, const uint8_t &seconds)
+void setStopTime(const uint8_t & hours, const uint8_t & minutes, const uint8_t & seconds)
 {
 	stopTime.hours = hours;
 	stopTime.minutes = minutes;
 	stopTime.seconds = seconds;
 }
 
-void handleMessage(char *smsbuff) {
+void handleMessage(char* smsbuff) {
 	String message = String(smsbuff);
 	if (message.startsWith(F("STANDBY"))) {
 		setStandbyMode(message.substring(8));
@@ -498,7 +509,7 @@ void removeTransmittingText() {
 	printSignalLevelToDisplay();
 }
 
-void setStandbyMode(const String& onlineTime) {
+void setStandbyMode(const String & onlineTime) {
 	state = STANDBY;
 	standByModeIsSet = true;
 	setGoOnlineAndStopTime(onlineTime);
@@ -510,7 +521,7 @@ void setStandbyMode(const String& onlineTime) {
 	standByModeIsSet = true;
 }
 
-void setReadyMode(const String& onlineTime) {
+void setReadyMode(const String & onlineTime) {
 	state = READY;
 	setGoOnlineAndStopTime(onlineTime);
 	delay(50);
@@ -651,7 +662,7 @@ void setup() {
 	printSignalLevelToDisplay();
 
 	/*	Define Startup-State here: */
-	setNeutralMode();
+	setStandbyMode("");
 	/********************************/
 }
 
@@ -795,13 +806,13 @@ void flushFONA() {
 void initFONA(boolean startup) {
 	lcd.clear();
 	lcd.setCursor(0, 0);
-	if (startup) { writeStatusTextToDisplay(F("Initializing")); }
+	if (startup) { writeStatusTextToDisplay(FS(initializing)); }
 
 	fonaSerial->begin(4800);
 	if (!fona.begin(*fonaSerial)) {
 		while (true);
 	}
-	if (startup) { writeStatusTextToDisplay(F("GSM Module Found")); }
+	if (startup) { writeStatusTextToDisplay(FS(gsmFound)); }
 
 	flushFONA();
 	// Optionally configure a GPRS APN, username, and password.
@@ -814,7 +825,7 @@ void initFONA(boolean startup) {
 		if (fona.getNetworkStatus() == 1)
 			break;
 	}
-	if (startup) { writeStatusTextToDisplay(F("SIM OK")); }
+	if (startup) { writeStatusTextToDisplay(FS(simOk)); }
 
 	flushFONA();
 
@@ -832,7 +843,7 @@ void initFONA(boolean startup) {
 
 	flushFONA();
 
-	if (startup) { writeStatusTextToDisplay(F("Network Found")); }
+	if (startup) { writeStatusTextToDisplay(FS(networkFound)); }
 	fona.enableGPRS(false);
 	delay(1000);
 	while (!fona.enableGPRS(true)) {
@@ -854,7 +865,7 @@ void initFONA(boolean startup) {
 	fona.enableNetworkTimeSync(true);
 	// END RTC
 
-	if (startup) { writeStatusTextToDisplay(F("GSM init Finished")); }
+	if (startup) { writeStatusTextToDisplay(FS(gsmFound)); }
 
 	flushFONA();
 }
@@ -868,20 +879,18 @@ void reInitGPRS() {
 
 void setStatus(uint8_t teamId, uint8_t status) {
 	setCurrentTeamColor(teamId);
-	const String url = URL_BASE + F("UpdateStatus.php?ID=") + ID + F("&TEAM=") + globalTeamColor + F("&STATUS=") + status;
+	const String url = URL_BASE + FS(statusURL) + ID + FS(teamQuery) + globalTeamColor + FS(statusQuery) + status;
 	Serial.println(url);
-	Serial.print(F("freeMemory()="));
-	Serial.println(freeMemory());
 	trySendData(url, 5, true);
 }
 
 void setAlive(boolean tryToReboot) {
-	const String url = URL_BASE + F("watchDog.php?ID=") + ID;
+	const String url = URL_BASE + FS(watchdogURL) + ID;
 	trySendData(url, 2, tryToReboot);
 	//interpretResponse();
 }
 
-void trySendData(const String& url, int8_t numberOfRetries, boolean tryToReboot) {
+void trySendData(const String & url, int8_t numberOfRetries, boolean tryToReboot) {
 	digitalWrite(LED_BUILTIN, LOW);
 	//fona.enableGPRS(true);
 	delay(200);
@@ -904,7 +913,7 @@ void trySendData(const String& url, int8_t numberOfRetries, boolean tryToReboot)
 }
 
 
-boolean sendData(const String& url) {
+boolean sendData(const String & url) {
 	char replybuffer[255];
 	uint16_t statuscode;
 	int16_t length;
@@ -916,7 +925,7 @@ boolean sendData(const String& url) {
 
 	fona.flush();
 
-	if (!fona.HTTP_GET_start(urlToSend, &statuscode, reinterpret_cast<uint16_t *>(&length))) {
+	if (!fona.HTTP_GET_start(urlToSend, &statuscode, reinterpret_cast<uint16_t*>(&length))) {
 		//Serial.println(F("Failed! sendding"));
 		fona.flush();
 		return false;
