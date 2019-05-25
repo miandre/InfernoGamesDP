@@ -15,7 +15,12 @@
 #include <MemoryFree.h>
 #include "InfernoGamesDP.h"
 
+/**************************DP-ID****************************************/
+#define ID 2
+/*******************************************************************/
 
+#define LED_POWER_HIGH 255
+#define LED_POWER_LOW 50
 
 #define FONA_RX 4
 #define FONA_TX 5
@@ -33,10 +38,10 @@
 #define SOR 2
 #define NA 3
 
-#define LED_COLOR_RED pixels.Color(255, 0, 0)
-#define LED_COLOR_BLUE pixels.Color(0, 0, 255)
-#define LED_COLOR_GREEN pixels.Color(0, 255, 0)
-#define LED_COLOR_YELLOW pixels.Color(255, 150, 0)
+#define LED_COLOR_RED pixels.Color(LED_POWER_LOW, 0, 0)
+#define LED_COLOR_BLUE pixels.Color(0, 0, LED_POWER_LOW)
+#define LED_COLOR_GREEN pixels.Color(0, LED_POWER_LOW, 0)
+#define LED_COLOR_YELLOW pixels.Color(LED_POWER_LOW, LED_POWER_LOW/2, 0)
 #define LED_COLOR_WHITE pixels.Color(255, 255, 255)
 #define LED_COLOR_WHITE_LOW pixels.Color(25, 25, 25)
 
@@ -48,7 +53,6 @@
 #define READY_TIME 3
 
 
-#define ID 5
 #define APN "halebop.telia.se"
 
 #define DEBOUNCE 10 
@@ -71,14 +75,11 @@ byte previous_keystate[NUMBUTTONS], current_keystate[NUMBUTTONS];
 
 
 
-void initFONA();
+void initFONA(boolean);
 void trySendData(const String&, int8_t, boolean);
 void setStatus(uint8_t, uint8_t);
 void setAlive(boolean);
 void reInitGPRS();
-void checkResetState();
-void reportStatusToWatchdog();
-//void interpretResponse();
 boolean sendData(const String&);
 
 enum State {
@@ -103,13 +104,13 @@ SoftwareSerial* fonaSerial = &fonaSs;
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 boolean fonaInitialized = false;
 
-volatile State state;
-byte currentTeam = NO_TEAM;
+State state;
+byte currentTeam;
 boolean standByModeIsSet = false;
 boolean readyModeSet = false;
 boolean neutralModeSet = false;
 boolean goOnlineTimeIsSet = false;
-volatile boolean resetState = false;
+boolean resetState = false;
 boolean resetReported = true;
 char PIN[5] = "1234";
 const String URL_BASE PROGMEM = "http://www.geeks.terminalprospect.com/AIR/";
@@ -139,6 +140,16 @@ const char PROGMEM teamQuery[] = { "&TEAM=" };
 const char PROGMEM statusQuery[] = { "&STATUS=" };
 const char PROGMEM watchdogURL[] = { "watchDog.php?ID=" };
 
+const char PROGMEM winner[] = { "WINNER" };
+const char PROGMEM scoreText[] = { "Score:   " };
+const char PROGMEM noWinner[] = { "NO WINNER" };
+const char PROGMEM capturing[] = { " capturing!" };
+const char PROGMEM transmitting[] = { "Transmitting status" };
+const char PROGMEM standBy[] = { "Please stand by" };
+const char PROGMEM onlineIn[] = { "Online in " };
+const char PROGMEM minutesText[] = { " minutes." };
+const char PROGMEM minuteText[] = { " minute." };
+const char PROGMEM blankRow[] = { "                       " };
 
 
 String globalTeamName;
@@ -271,7 +282,6 @@ void check_switches()
 			}
 			pressed[index] = !currentstate[index];  // remember, digital HIGH means NOT pressed
 		}
-		//Serial.println(pressed[index], DEC);
 		previousstate[index] = currentstate[index];   // keep a running tally of the buttons
 	}
 }
@@ -289,8 +299,7 @@ byte getPressedButton() {
 	return thisSwitch;
 }
 
-void writeTeamLogoToDisplay(byte team) {
-	setGlobalTeamString(team);
+void writeCurrentTeamLogoToDisplay() {
 	lcd.clear();
 	lcd.setFontSize(FONT_SIZE_XLARGE);
 	lcd.setCursor((128 - (globalTeamName.length() * 9)) / 2, 3);
@@ -330,11 +339,13 @@ void lightUpTeamColour(byte team) {
 	case SOR:
 		ledColor = LED_COLOR_GREEN;
 		break;
+	case NO_TEAM:
+		ledColor = LED_COLOR_WHITE_LOW;
+		break;
 	}
 	pixels.fill(ledColor, 0, 8);
 	pixels.show();
 }
-
 
 byte getTeamIdFromName(const String & team) {
 	if (team.equalsIgnoreCase(FS(bears))) return BEARS;
@@ -436,7 +447,6 @@ boolean checkForSMS(char* smsbuff) {
 	return false;
 }
 
-
 TIME getTime() {
 	TIME currentTime;
 	char buffer[23];
@@ -462,12 +472,12 @@ void setGoOnlineAndStopTime(const String & onlineTime) {
 	}
 }
 
-void setStopTime(const uint8_t & hours, const uint8_t & minutes, const uint8_t & seconds)
-{
+void setStopTime(const uint8_t & hours, const uint8_t & minutes, const uint8_t & seconds) {
 	stopTime.hours = hours;
 	stopTime.minutes = minutes;
 	stopTime.seconds = seconds;
 }
+
 
 void handleMessage(char* smsbuff) {
 	String message = String(smsbuff);
@@ -491,21 +501,31 @@ void handleMessage(char* smsbuff) {
 		uint8_t seconds = time.substring(6, 8).toInt();
 		setStopTime(hours, minutes, seconds);
 	}
+	else if (message.startsWith(F("CHECK"))) {
+		setAlive(true);
+	}
 }
 
-
 void displayTransmittingText() {
+	lcd.clear();
+	printSignalLevelToDisplay();
 	lcd.setFontSize(FONT_SIZE_SMALL);
-	lcd.setCursor(0, 6);
-	lcd.println(F("Transmitting data..."));
-	lcd.print(F("Please stand by..."));
+	lcd.setCursor((128 - ((sizeof(capturing) + 3) * 5)) / 2, 3);
+	lcd.print(globalTeamName);
+	lcd.print(FS(capturing));
+	lcd.setCursor((128 - (sizeof(transmitting) * 5)) / 2, 6);
+	lcd.print(FS(transmitting));
+	lcd.setCursor((128 - (sizeof(standBy) * 5)) / 2, 7);
+	lcd.print(FS(standBy));
 }
 
 void removeTransmittingText() {
 	lcd.setFontSize(FONT_SIZE_SMALL);
+	lcd.setCursor(0, 2);
+	lcd.print(FS(blankRow));
 	lcd.setCursor(0, 6);
-	lcd.println(F("                     "));
-	lcd.print(F("                   "));
+	lcd.println(FS(blankRow));
+	lcd.print(FS(blankRow));
 	printSignalLevelToDisplay();
 }
 
@@ -513,7 +533,7 @@ void setStandbyMode(const String & onlineTime) {
 	state = STANDBY;
 	standByModeIsSet = true;
 	setGoOnlineAndStopTime(onlineTime);
-	delay(50);
+	setAlive(false);
 	lcd.clear();
 	pixels.clear();
 	pixels.show();
@@ -524,7 +544,7 @@ void setStandbyMode(const String & onlineTime) {
 void setReadyMode(const String & onlineTime) {
 	state = READY;
 	setGoOnlineAndStopTime(onlineTime);
-	delay(50);
+	setAlive(false);
 	lcd.clear();
 	pixels.clear();
 	pixels.show();
@@ -557,16 +577,17 @@ void setTakenMode(byte team) {
 
 	startTime = time;
 	currentTeam = team;
+	setGlobalTeamString(currentTeam);
 	state = TAKEN;
 	lcd.backlight(true);
 	digitalWrite(BUTTON_LED_PIN, LOW);
-	writeTeamLogoToDisplay(team);
 	lightUpTeamColour(team);
 	delay(50);
 	displayTransmittingText();
 
 	setStatus(team, 2);
 
+	writeCurrentTeamLogoToDisplay();
 	removeTransmittingText();
 	digitalWrite(BUTTON_LED_PIN, HIGH);
 
@@ -582,28 +603,38 @@ void setEndMode() {
 
 	digitalWrite(BUTTON_LED_PIN, LOW);
 	setResult();
+	currentTeam = NO_TEAM;
 }
 
 void setResult() {
 	lcd.clear();
 
-	byte maxIndex = 0;
-	uint16_t maxValue = score[maxIndex];
+	uint16_t points = score[0];
 	for (byte i = 1; i < NUMBER_OF_TEAMS; i++) {
-		Serial.print(i);
-		Serial.print(" ");
-		Serial.println(score[i]);
-		if (score[i] > maxValue) {
-			maxValue = score[i];
-			maxIndex = i;
+		if (score[i] > points) {
+			points = score[i];
+			currentTeam = i;
 		}
 	}
-	writeTeamLogoToDisplay(maxIndex);
-	lightUpTeamColour(maxIndex);
-	lcd.setCursor(0, 6);
-	lcd.setFontSize(FONT_SIZE_SMALL);
-	lcd.printInt(maxValue);
-	lcd.print(F(" Points"));
+
+	if (points > 0) {
+		setGlobalTeamString(currentTeam);
+		writeCurrentTeamLogoToDisplay();
+		lightUpTeamColour(currentTeam);
+		lcd.setFontSize(FONT_SIZE_SMALL);
+		lcd.setCursor((128 - (sizeof(winner) * 5)) / 2, 1);
+		lcd.print(FS(winner));
+		lcd.setCursor(20, 6);
+		lcd.setCursor((128 - ((sizeof(scoreText) + 3) * 5)) / 2, 6);
+		lcd.print(FS(scoreText));
+		lcd.printInt(points);
+	}
+	else {
+		lcd.setFontSize(FONT_SIZE_SMALL);
+		lcd.setCursor((128 - ((sizeof(noWinner) + 4) * 5)) / 2, 4);
+		lcd.print(FS(noWinner));
+		printSignalLevelToDisplay();
+	}
 }
 
 
@@ -620,12 +651,12 @@ void printSignalLevelToDisplay() {
 		lcd.setCursor(0, 0);
 		lcd.draw(transmition[0], 16, 8);
 	}
-	if ((n == 1) || (n == 2)) {
+	if ((n >= 1) && (n <= 15)) {
 		lcd.setCursor(0, 0);
 		lcd.draw(transmition[1], 16, 8);
 	}
-	if ((n >= 3) && (n <= 31)) {
-		byte i = map(n, 2, 31, 2, 5);
+	if ((n >= 16) && (n <= 31)) {
+		byte i = map(n, 16, 31, 2, 5);
 		lcd.setCursor(0, 0);
 		lcd.draw(transmition[i], 16, 8);
 	}
@@ -633,7 +664,7 @@ void printSignalLevelToDisplay() {
 }
 
 void resetScore() {
-	for (byte i = 1; i < NUMBER_OF_TEAMS; i++) {
+	for (byte i = 0; i < NUMBER_OF_TEAMS; i++) {
 		score[i] = 0;
 	}
 }
@@ -655,6 +686,7 @@ void setup() {
 	setupNeoPixelBar();
 	setupButtons();
 	digitalWrite(BUTTON_LED_PIN, HIGH);
+	currentTeam = NO_TEAM;
 	delay(100);
 	initFONA(true);
 	lcd.clear();
@@ -670,8 +702,8 @@ void setup() {
 ****************************    MAIN PROGRAM    ***********************************
 ************************************************************************************/
 void loop() {
-	Serial.print(F("freeMemory()="));
-	Serial.println(freeMemory());
+	//Serial.print(F("freeMemory()="));
+	//Serial.println(freeMemory());
 
 	while (1) {
 		noTone(2);
@@ -684,14 +716,11 @@ void loop() {
 			if (!standByModeIsSet) {
 				setStandbyMode("");
 			}
-			//if (loopCounter++ > 200000) {
 			printSignalLevelToDisplay();
 			if (goOnlineTimeIsSet && getTimeDiffInMinutes(goOnline, getTime()) < READY_TIME) {
 				state = READY;
 			}
 			delay(5000);
-			//loopCounter = 0;
-		//}
 			break;
 		case READY:
 			timeLeft = getTimeDiffInMinutes(goOnline, getTime());
@@ -706,9 +735,9 @@ void loop() {
 			lcd.clear();
 			lcd.setCursor(0, 4);
 			lcd.setFontSize(FONT_SIZE_SMALL);
-			lcd.print(F("Online in "));
+			lcd.print(FS(onlineIn));
 			lcd.printInt(timeLeft);
-			lcd.print(F(" minutes"));
+			lcd.print(timeLeft > 1 ? FS(minutesText) : FS(minuteText));
 			printSignalLevelToDisplay();
 			delay(10000);
 			break;
@@ -733,10 +762,8 @@ void loop() {
 			resetScore();
 			while (1) {
 				delay(5000);
-				Serial.println(F("X"));
 				if (checkForSMS(messageContent)) {
 					handleMessage(messageContent);
-					Serial.println(F("Y"));
 					break;
 				}
 			}
@@ -748,53 +775,6 @@ void loop() {
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
-void checkResetState() {
-	if (resetState) {
-		state = NEUTRAL;
-		delay(20);
-		resetReported = false;
-		resetState = false;
-	}
-}
-
-void reportStatusToWatchdog() {
-
-	checkResetState();
-	if (state == NEUTRAL && !resetReported) {
-		setStatus(NO_TEAM, 2);
-		resetReported = true;
-	}
-	else {
-		setAlive(true);
-	}
-}
-
-//void interpretResponse()
-//{
-//	String buffer(replybuffer);
-//	if (buffer.startsWith(String('#'))) {
-//		uint8_t teamEnd = buffer.indexOf('*');
-//		uint8_t statusStart = teamEnd + 1;
-//		String team = buffer.substring(1, teamEnd);
-//		uint8_t status = buffer.substring(statusStart, statusStart + 1).toInt();
-//
-//		switch (status) {
-//		case 2:
-//			if (team.equals(F("BLUE"))) {
-//				state = TAKEN;
-//			}
-//			else if (team.equals(F("RED"))) {
-//				state = TAKEN;
-//			}
-//			else {
-//				state = NEUTRAL;
-//			}
-//			break;
-//		}
-//		memset(replybuffer, 0, sizeof(replybuffer));
-//	}
-//}
-
 void flushFONA() {
 	flushSerial();
 	while (fona.available()) {
@@ -804,9 +784,11 @@ void flushFONA() {
 }
 
 void initFONA(boolean startup) {
-	lcd.clear();
-	lcd.setCursor(0, 0);
-	if (startup) { writeStatusTextToDisplay(FS(initializing)); }
+	if (startup) {
+		lcd.clear();
+		lcd.setCursor(0, 0);
+		writeStatusTextToDisplay(FS(initializing));
+	}
 
 	fonaSerial->begin(4800);
 	if (!fona.begin(*fonaSerial)) {
@@ -860,10 +842,8 @@ void initFONA(boolean startup) {
 		}
 	}
 
-	//TESTING RTC! WORKS!"
 	fona.enableRTC(1);
 	fona.enableNetworkTimeSync(true);
-	// END RTC
 
 	if (startup) { writeStatusTextToDisplay(FS(gsmFound)); }
 
@@ -881,35 +861,34 @@ void setStatus(uint8_t teamId, uint8_t status) {
 	setCurrentTeamColor(teamId);
 	const String url = URL_BASE + FS(statusURL) + ID + FS(teamQuery) + globalTeamColor + FS(statusQuery) + status;
 	Serial.println(url);
-	trySendData(url, 5, true);
+	trySendData(url, 2, true);
 }
 
 void setAlive(boolean tryToReboot) {
 	const String url = URL_BASE + FS(watchdogURL) + ID;
 	trySendData(url, 2, tryToReboot);
-	//interpretResponse();
 }
 
 void trySendData(const String & url, int8_t numberOfRetries, boolean tryToReboot) {
 	digitalWrite(LED_BUILTIN, LOW);
-	//fona.enableGPRS(true);
 	delay(200);
 
 	int8_t reInitCounter = numberOfRetries;
 	while (!sendData(url)) {
 		reInitGPRS();
-		if (--reInitCounter >= 0 && tryToReboot) {
-			initFONA(false);
-			delay(1000);
-			//reInitCounter = numberOfRetries;
-		}
-		else {
-			break;
+		if (!sendData(url)) {
+
+			if (--reInitCounter >= 0 && tryToReboot) {
+				initFONA(false);
+				delay(1000);
+			}
+			else {
+				break;
+			}
 		}
 	}
 
 	digitalWrite(LED_BUILTIN, HIGH);
-	//fona.enableGPRS(false);
 }
 
 
@@ -952,6 +931,5 @@ boolean sendData(const String & url) {
 	fona.flush();
 
 	return statuscode == 200;
-
 }
 
