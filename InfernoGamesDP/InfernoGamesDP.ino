@@ -79,6 +79,8 @@ void initFONA(boolean);
 void trySendData(const String&, int8_t, boolean);
 void setStatus(uint8_t, uint8_t);
 void setAlive(boolean);
+void reportGameStart();
+void reportGameEnd();
 void reInitGPRS();
 boolean sendData(const String&);
 
@@ -135,10 +137,13 @@ const char PROGMEM simOk[] = { "SIM OK" };
 const char PROGMEM gsmFound[] = { "GSM module found" };
 const char PROGMEM networkFound[] = { "Network found" };
 
-const char PROGMEM statusURL[] = { "UpdateStatus.php?ID=" };
+const char PROGMEM statusURL[] = { "UpdateStatus.php?ID="};
 const char PROGMEM teamQuery[] = { "&TEAM=" };
 const char PROGMEM statusQuery[] = { "&STATUS=" };
 const char PROGMEM watchdogURL[] = { "watchDog.php?ID=" };
+const char PROGMEM startURL[] = { "StartGame.php?ID=" };
+const char PROGMEM stopURL[] = { "StopGame.php?ID=" };
+const char PROGMEM winnerQuery[] = { "&WINNER=" };
 
 const char PROGMEM winner[] = { "WINNER" };
 const char PROGMEM scoreText[] = { "Score:   " };
@@ -553,6 +558,7 @@ void setReadyMode(const String & onlineTime) {
 
 void setNeutralMode() {
 	state = NEUTRAL;
+	reportGameStart();
 	setStatus(NO_TEAM, 2);
 	lcd.backlight(true);
 	lcd.clear();
@@ -603,6 +609,7 @@ void setEndMode() {
 
 	digitalWrite(BUTTON_LED_PIN, LOW);
 	setResult();
+	reportGameEnd();
 	currentTeam = NO_TEAM;
 }
 
@@ -704,7 +711,6 @@ void setup() {
 void loop() {
 	//Serial.print(F("freeMemory()="));
 	//Serial.println(freeMemory());
-
 	while (1) {
 		noTone(2);
 		if (checkForSMS(messageContent)) {
@@ -869,6 +875,17 @@ void setAlive(boolean tryToReboot) {
 	trySendData(url, 2, tryToReboot);
 }
 
+void reportGameStart() {
+	const String url = URL_BASE + FS(startURL) + ID;
+	Serial.println(url);
+	trySendData(url, 2, true);
+}
+
+void reportGameEnd() {
+	const String url = URL_BASE + FS(stopURL) + ID + FS(winnerQuery) + globalTeamName;
+	trySendData(url, 2, true);
+}
+
 void trySendData(const String & url, int8_t numberOfRetries, boolean tryToReboot) {
 	digitalWrite(LED_BUILTIN, LOW);
 	delay(200);
@@ -897,6 +914,7 @@ boolean sendData(const String & url) {
 	uint16_t statuscode;
 	int16_t length;
 	uint8_t i = 0;
+	Serial.println(url);
 
 	char urlToSend[90];
 	url.toCharArray(urlToSend, 90);
