@@ -31,25 +31,19 @@
 
 #define RED 0
 #define BLUE 1
-#define GREEN 2
 #define YELLOW 3
 #define NUMBER_OF_TEAMS 3
 
 #define NO_TEAM 99
 #define BEARS 0
 #define STF 1
-#define SOR 2
 #define NA 3
 
 #define LED_COLOR_RED pixels.Color(LED_POWER_LOW, 0, 0)
 #define LED_COLOR_BLUE pixels.Color(0, 0, LED_POWER_LOW)
-#define LED_COLOR_GREEN pixels.Color(0, LED_POWER_LOW, 0)
-#define LED_COLOR_YELLOW pixels.Color(LED_POWER_LOW, LED_POWER_LOW/2, 0)
 #define LED_COLOR_WHITE pixels.Color(255, 255, 255)
 #define LED_COLOR_WHITE_LOW pixels.Color(25, 25, 25)
 
-#define RED_BUTTON_PIN 2
-#define BLUE_BUTTON_PIN 3
 #define BUTTON_LED_PIN 9
 
 #define APN "halebop.telia.se"
@@ -68,7 +62,7 @@ Adafruit_NeoPixel pixels(NUMPIXELS, NEO_PIN, NEO_GRB + NEO_KHZ800);
 LCD_SSD1306 lcd;
 
 // Button helpers
-byte buttons[] = { A0, A1, A2 };
+byte buttons[] = { A0, A1, A2, A3 };
 byte pressed[NUMBUTTONS], justpressed[NUMBUTTONS], justreleased[NUMBUTTONS];
 byte previous_keystate[NUMBUTTONS], current_keystate[NUMBUTTONS];
 
@@ -121,12 +115,10 @@ uint32_t loopCounter = 0;
 #define FS(x) (__FlashStringHelper*)(x)
 const char stf[]  PROGMEM = { "STF" };
 const char bears[]  PROGMEM = { "BEARS" };
-const char sor[]  PROGMEM = { "SoR" };
 const char noTeam[]  PROGMEM = { "NOTEAM" };
 
 const char PROGMEM red[] = { "RED" };
 const char PROGMEM blue[] = { "BLUE" };
-const char PROGMEM green[] = { "GREEN" };
 const char PROGMEM black[] = { "BLACK" };;
 
 const char PROGMEM initializing[] = { "Initializing" };
@@ -143,7 +135,6 @@ const char PROGMEM stopURL[] = { "StopGame.php?ID=" };
 
 const char PROGMEM bearsQuery[] = { "&BEARS=" };
 const char PROGMEM stfQuery[] = { "&STF=" };
-const char PROGMEM sorQuery[] = { "&SOR=" };
 
 const char PROGMEM winner[] = { "WINNER" };
 const char PROGMEM scoreText[] = { "Score:   " };
@@ -321,9 +312,6 @@ void setGlobalTeamString(const byte & team)
 	case STF:
 		globalTeamName = FS(stf);
 		break;
-	case SOR:
-		globalTeamName = FS(sor);
-		break;
 	}
 }
 
@@ -334,14 +322,8 @@ void lightUpTeamColour(byte team) {
 	case BEARS:
 		ledColor = LED_COLOR_RED;
 		break;
-	case NA:
-		ledColor = LED_COLOR_YELLOW;
-		break;
 	case STF:
 		ledColor = LED_COLOR_BLUE;
-		break;
-	case SOR:
-		ledColor = LED_COLOR_GREEN;
 		break;
 	case NO_TEAM:
 		ledColor = LED_COLOR_WHITE_LOW;
@@ -354,7 +336,6 @@ void lightUpTeamColour(byte team) {
 byte getTeamIdFromName(const String & team) {
 	if (team.equalsIgnoreCase(FS(bears))) return BEARS;
 	if (team.equalsIgnoreCase(FS(stf))) return STF;
-	if (team.equalsIgnoreCase(FS(sor))) return SOR;
 }
 
 void setCurrentTeamColor(byte team) {
@@ -365,9 +346,6 @@ void setCurrentTeamColor(byte team) {
 		break;
 	case STF:
 		globalTeamColor = FS(blue);
-		break;
-	case SOR:
-		globalTeamColor = FS(green);
 		break;
 	case NO_TEAM:
 		globalTeamColor = FS(black);
@@ -389,13 +367,10 @@ void handleButtons(byte pressedButton) {
 			setTakenMode(BEARS);
 			break;
 		case YELLOW:
-			setTakenMode(NA);
+			setNeutralMode(false);
 			break;
 		case BLUE:
 			setTakenMode(STF);
-			break;
-		case GREEN:
-			setTakenMode(SOR);
 			break;
 		}
 	}
@@ -487,7 +462,7 @@ void handleMessage(char* smsbuff) {
 		setReadyMode(message.substring(6));
 	}
 	else if (message.startsWith(F("NEUTRAL"))) {
-		setNeutralMode();
+		setNeutralMode(true);
 	}
 	else if (message.startsWith(F("TAKEN"))) {
 		//currentTeam = getTeamIdFromName(message.substring(6));
@@ -553,12 +528,14 @@ void setReadyMode(const String & onlineTime) {
 	digitalWrite(BUTTON_LED_PIN, LOW);
 }
 
-void setNeutralMode() {
+void setNeutralMode(boolean shouldResetScore) {
 	state = NEUTRAL;
 	currentTeam = NO_TEAM;
 	endModeSet = false;
 	reportGameStart();
-	resetScore();
+	if (shouldResetScore) {
+		resetScore();
+	}
 	setStatus(NO_TEAM, 2);
 	lcd.backlight(true);
 	lcd.clear();
@@ -707,7 +684,9 @@ void setup() {
 	printSignalLevelToDisplay();
 
 	/*	Define Startup-State here: */
-	setStandbyMode("");
+
+	//setStandbyMode("");
+	setNeutralMode(true);
 	/********************************/
 }
 
@@ -743,7 +722,7 @@ void loop() {
 				setReadyMode("");
 			}
 			if (timeLeft < 1) {
-				setNeutralMode();
+				setNeutralMode(true);
 				break;
 			}
 			lcd.clear();
@@ -892,7 +871,7 @@ void reportGameStart() {
 }
 
 void reportGameEnd(boolean transmit) {
-	const String url = URL_BASE + FS(stopURL) + ID  + FS(stfQuery) + score[STF] + FS(bearsQuery)+score[BEARS] + FS(sorQuery) + score[SOR];
+	const String url = URL_BASE + FS(stopURL) + ID  + FS(stfQuery) + score[STF] + FS(bearsQuery)+score[BEARS];
 	DEBUG_PRINTLN(url);
 	if (transmit) {
 		trySendData(url, 2, true);
