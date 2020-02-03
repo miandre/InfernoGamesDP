@@ -139,6 +139,7 @@ const char PROGMEM stfQuery[] = { "&STF=" };
 const char PROGMEM winner[] = { "WINNER" };
 const char PROGMEM scoreText[] = { "Score:   " };
 const char PROGMEM noWinner[] = { "NO WINNER" };
+const char PROGMEM neutralizing[] = { "NEUTRALIZING" };
 const char PROGMEM capturing[] = { " capturing!" };
 const char PROGMEM transmitting[] = { "Transmitting status" };
 const char PROGMEM standBy[] = { "Please stand by" };
@@ -367,7 +368,7 @@ void handleButtons(byte pressedButton) {
 			setTakenMode(BEARS);
 			break;
 		case YELLOW:
-			setNeutralMode(false);
+			neutralizeDP();
 			break;
 		case BLUE:
 			setTakenMode(STF);
@@ -526,6 +527,34 @@ void setReadyMode(const String & onlineTime) {
 	pixels.clear();
 	pixels.show();
 	digitalWrite(BUTTON_LED_PIN, LOW);
+}
+
+void neutralizeDP(){
+	endModeSet = false;
+	TIME time = getTime();
+	uint16_t timeCaptured = getTimeDiffInSeconds(time, startTime);
+
+	if (currentTeam != NO_TEAM) {
+		score[currentTeam] += timeCaptured;
+	}
+
+	lcd.setFontSize(FONT_SIZE_SMALL);
+	lcd.setCursor((128 - ((sizeof(neutralizing) + 4) * 5)) / 2, 4);
+	lcd.print(FS(neutralizing));
+	lcd.setCursor((128 - (sizeof(transmitting) * 5)) / 2, 6);
+	lcd.print(FS(transmitting));
+	lcd.setCursor((128 - (sizeof(standBy) * 5)) / 2, 7);
+	lcd.print(FS(standBy));
+
+	setStatus(NO_TEAM, 2);
+	lcd.backlight(true);
+	lcd.clear();
+	lcd.setCursor(32, 0);
+	lcd.draw(logo, 64, 64);
+	printSignalLevelToDisplay();
+	digitalWrite(BUTTON_LED_PIN, HIGH);
+	pixels.fill(LED_COLOR_WHITE_LOW, 0, 8);
+	pixels.show();
 }
 
 void setNeutralMode(boolean shouldResetScore) {
