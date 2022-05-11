@@ -1,11 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 15
-VisualStudioVersion = 15.0.27428.2037
+# Visual Studio Version 17
+VisualStudioVersion = 17.1.32407.343
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "InfernoGamesDP", "InfernoGamesDP\InfernoGamesDP.vcxproj", "{C5F80730-F44F-4478-BDAE-6634EFC2CA88}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Adafruit_FONA", "..\..\libraries\Adafruit_FONA\Adafruit_FONA.vcxitems", "{6DEFB74E-4AA3-4108-A77F-B776F1896541}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{17873FD6-14B9-40C9-A364-387FE82AF390}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

@@ -98,6 +98,8 @@ void setup() {
   // and password values.  Username and password are optional and
   // can be removed, but APN is required.
   fona.setGPRSNetworkSettings(F("halebop.telia.se"));
+           // fona.setHTTPSRedirect(true);   
+           fona.enableRTC(1);
 
   // Optionally configure HTTP gets to follow redirects over SSL.
   // Default is not to follow SSL redirects, however if you uncomment
@@ -609,7 +611,8 @@ void loop() {
 
     case 'y': {
         // enable network time sync
-        if (!fona.enableNetworkTimeSync(true))
+//        if (!fona.enableNetworkTimeSync(true))
+          if (!fona.enableRTC(1))
           Serial.println(F("Failed to enable"));
         break;
       }
@@ -807,23 +810,23 @@ void loop() {
         break;
       }
 
-	case 'D': {
-
-		//flushSerial();
-		//char data[80];
-		//Serial.println(F("Enter AT Command: "));
-		//readline(data, 79);
-		String response = sendATCommand("AT+CPIN?");
-		//Serial.println("resp " +response);
-		break;
-	}
-	case 'Q': {
-
-		flushSerial();
-		String response = sendATCommand("AT+CPWD=\"SC\",\"3014\",\"0000\"");
-		Serial.println(response);
-		break;
-	}
+//	case 'D': {
+//
+//		//flushSerial();
+//		//char data[80];
+//		//Serial.println(F("Enter AT Command: "));
+//		//readline(data, 79);
+//		String response = sendATCommand("AT+CPIN?");
+//		//Serial.println("resp " +response);
+//		break;
+//	}
+//	case 'Q': {
+//
+//		flushSerial();
+//		String response = sendATCommand("AT+CPWD=\"SC\",\"3014\",\"1234\"");
+//		Serial.println(response);
+//		break;
+//	}
 
     default: {
         Serial.println(F("Unknown command"));

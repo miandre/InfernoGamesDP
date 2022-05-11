@@ -12,7 +12,6 @@
 
 #include <Adafruit_FONA.h>
 #include <SoftwareSerial.h>
-#include <MemoryFree.h>
 #include "InfernoGamesDP.h"
 
 /**************************DP-ID****************************************/
@@ -20,7 +19,7 @@
 /*******************************************************************/
 
 #define DEFAULT_GAME_TIME 2
-#define READY_TIME 30
+#define READY_TIME 3
 
 #define LED_POWER_HIGH 255
 #define LED_POWER_LOW 100
@@ -32,7 +31,7 @@
 #define RED 0
 #define BLUE 1
 #define YELLOW 3
-#define NUMBER_OF_TEAMS 3
+#define NUMBER_OF_TEAMS 2
 
 #define NO_TEAM 99
 #define BEARS 0
@@ -80,7 +79,8 @@ enum State {
 	READY,
 	NEUTRAL,
 	TAKEN,
-	END
+	END,
+	KILLED
 };
 
 struct TIME
@@ -105,12 +105,13 @@ boolean endModeSet = false;
 boolean resetState = false;
 boolean resetReported = true;
 char PIN[5] = "1234";
-const String URL_BASE PROGMEM = "http://www.geeks.terminalprospect.com/AIR/";
+const String URL_BASE = "http://www.geeks.terminalprospect.com/AIR/";
 uint16_t score[NUMBER_OF_TEAMS];
 TIME startTime;
 TIME goOnline;
 TIME stopTime;
 uint32_t loopCounter = 0;
+char fonaInBuffer[64];
 
 #define FS(x) (__FlashStringHelper*)(x)
 const char stf[]  PROGMEM = { "STF" };
@@ -140,6 +141,7 @@ const char PROGMEM winner[] = { "WINNER" };
 const char PROGMEM scoreText[] = { "Score:   " };
 const char PROGMEM noWinner[] = { "NO WINNER" };
 const char PROGMEM neutralizing[] = { "NEUTRALIZING" };
+const char PROGMEM neutralized[] = { "NEUTRALIZED" };
 const char PROGMEM capturing[] = { " capturing!" };
 const char PROGMEM transmitting[] = { "Transmitting status" };
 const char PROGMEM standBy[] = { "Please stand by" };
@@ -200,11 +202,11 @@ const byte logo[] PROGMEM = {
 
 char messageContent[30];
 
-uint16_t getTimeDiffInMinutes(struct TIME stop, struct TIME start) {
-	return getTimeDiffInSeconds(stop, start) / 60;
-}
+//uint16_t getTimeDiffInMinutes(struct TIME stop, struct TIME start) {
+//	return getTimeDiffInSeconds(stop, start) / 60;
+//}
 
-uint16_t getTimeDiffInSeconds(struct TIME stop, struct TIME start) {
+uint16_t getTimeDiffInMinutes(struct TIME stop, struct TIME start) {
 	if (stop.seconds < start.seconds) {
 		--stop.minutes;
 		stop.seconds += 60;
@@ -221,7 +223,7 @@ uint16_t getTimeDiffInSeconds(struct TIME stop, struct TIME start) {
 	uint8_t minDiff = stop.minutes - start.minutes;
 	uint8_t secDiff = stop.seconds - start.seconds;
 
-	return  ((hourDiff * 60 * 60) + (minDiff * 60) + secDiff);
+	return  ((hourDiff * 60) + (minDiff) + (secDiff > 30 ? 1 : 0));
 }
 
 void setupDisplay() {
@@ -378,8 +380,7 @@ void handleButtons(byte pressedButton) {
 }
 
 boolean checkForSMS(char* smsbuff) {
-	if (fonaInitialized) {
-		char fonaInBuffer[64];
+	if (fonaInitialized) {	
 		char* bufPtr = fonaInBuffer;    //handy buffer pointer
 		if (fona.available()) {     //any data available from the FONA?
 			uint8_t slot = 0;            //this will be the slot number of the SMS
@@ -414,7 +415,7 @@ boolean checkForSMS(char* smsbuff) {
 			//Scan the notification string for an SMS received notification.
 			//  If it's an SMS message, we'll get the slot number in 'slot'
 			if (1 == sscanf(fonaInBuffer, "+CMTI: \"SM\",%d", &slot)) {
-				if (fona.readSMS(slot, smsbuff, 40, &smslen)) {
+				if (fona.readSMS(slot, smsbuff, 80, &smslen)) {
 					fona.deleteSMS(slot);
 					return true;
 				}
@@ -454,6 +455,13 @@ void setStopTime(const uint8_t & hours, const uint8_t & minutes, const uint8_t &
 	stopTime.seconds = seconds;
 }
 
+void printTransmittingInfo() {
+	lcd.setCursor((128 - (sizeof(transmitting) * 5)) / 2, 6);
+	lcd.print(FS(transmitting));
+	lcd.setCursor((128 - (sizeof(standBy) * 5)) / 2, 7);
+	lcd.print(FS(standBy));
+}
+
 void handleMessage(char* smsbuff) {
 	String message = String(smsbuff);
 	if (message.startsWith(F("STANDBY"))) {
@@ -462,11 +470,13 @@ void handleMessage(char* smsbuff) {
 	else if (message.startsWith(F("READY"))) {
 		setReadyMode(message.substring(6));
 	}
+	else if (message.startsWith(F("NEUTRALIZE"))) {
+		neutralizeDP();
+	}
 	else if (message.startsWith(F("NEUTRAL"))) {
 		setNeutralMode(true);
 	}
 	else if (message.startsWith(F("TAKEN"))) {
-		//currentTeam = getTeamIdFromName(message.substring(6));
 		setTakenMode(getTeamIdFromName(message.substring(6)));
 	}
 	else if (message.startsWith(F("STOP"))) {
@@ -488,10 +498,7 @@ void displayTransmittingText() {
 	lcd.setCursor((128 - ((sizeof(capturing) + 3) * 5)) / 2, 3);
 	lcd.print(globalTeamName);
 	lcd.print(FS(capturing));
-	lcd.setCursor((128 - (sizeof(transmitting) * 5)) / 2, 6);
-	lcd.print(FS(transmitting));
-	lcd.setCursor((128 - (sizeof(standBy) * 5)) / 2, 7);
-	lcd.print(FS(standBy));
+	printTransmittingInfo();
 }
 
 void removeTransmittingText() {
@@ -511,6 +518,9 @@ void setStandbyMode(const String & onlineTime) {
 	setGoOnlineAndStopTime(onlineTime);
 	setStatus(NO_TEAM, 3);
 	lcd.clear();
+	lcd.backlight(false);
+	lcd.setCursor(32, 0);
+	lcd.draw(logo, 64, 64);
 	pixels.clear();
 	pixels.show();
 	digitalWrite(BUTTON_LED_PIN, LOW);
@@ -524,45 +534,46 @@ void setReadyMode(const String & onlineTime) {
 	setStatus(NO_TEAM, 1);
 	readyModeSet = true;
 	lcd.clear();
+	lcd.backlight(false);
+	lcd.setCursor(32, 0);
+	lcd.draw(logo, 64, 64);
 	pixels.clear();
 	pixels.show();
-	digitalWrite(BUTTON_LED_PIN, LOW);
+	digitalWrite(BUTTON_LED_PIN, HIGH);
 }
 
 void neutralizeDP(){
-	endModeSet = false;
 	TIME time = getTime();
-	uint16_t timeCaptured = getTimeDiffInSeconds(time, startTime);
+	uint16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
 
 	if (currentTeam != NO_TEAM) {
 		score[currentTeam] += timeCaptured;
 	}
+	startTime = time;
 
+	lcd.clear();
 	lcd.setFontSize(FONT_SIZE_SMALL);
 	lcd.setCursor((128 - ((sizeof(neutralizing) + 4) * 5)) / 2, 4);
 	lcd.print(FS(neutralizing));
-	lcd.setCursor((128 - (sizeof(transmitting) * 5)) / 2, 6);
-	lcd.print(FS(transmitting));
-	lcd.setCursor((128 - (sizeof(standBy) * 5)) / 2, 7);
-	lcd.print(FS(standBy));
+	printTransmittingInfo();
 
+	state = KILLED;
+	currentTeam = NO_TEAM;
+	endModeSet = false;
 	setStatus(NO_TEAM, 2);
-	lcd.backlight(true);
+	DEBUG_PRINT(F("KILLED1"));
 	lcd.clear();
-	lcd.setCursor(32, 0);
-	lcd.draw(logo, 64, 64);
-	printSignalLevelToDisplay();
-	digitalWrite(BUTTON_LED_PIN, HIGH);
-	pixels.fill(LED_COLOR_WHITE_LOW, 0, 8);
-	pixels.show();
+	lcd.setFontSize(FONT_SIZE_SMALL);
+	lcd.setCursor((128 - ((sizeof(neutralized) + 4) * 5)) / 2, 4);
+	lcd.print(FS(neutralized));
 }
 
 void setNeutralMode(boolean shouldResetScore) {
 	state = NEUTRAL;
 	currentTeam = NO_TEAM;
 	endModeSet = false;
-	reportGameStart();
 	if (shouldResetScore) {
+		reportGameStart();
 		resetScore();
 	}
 	setStatus(NO_TEAM, 2);
@@ -579,16 +590,16 @@ void setNeutralMode(boolean shouldResetScore) {
 void setTakenMode(byte team) {
 	endModeSet = false;
 	TIME time = getTime();
-	uint16_t timeCaptured = getTimeDiffInSeconds(time, startTime);
 
 	if (currentTeam != NO_TEAM) {
+		uint16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
 		score[currentTeam] += timeCaptured;
+		startTime = time;
 	}
 	else {
-		setStartTime(getTime());
+		setStartTime(time);
 	}
 
-	startTime = time;
 	currentTeam = team;
 	setGlobalTeamString(currentTeam);
 	state = TAKEN;
@@ -601,57 +612,27 @@ void setTakenMode(byte team) {
 	setStatus(team, 2);
 
 	writeCurrentTeamLogoToDisplay();
-	removeTransmittingText();
+	printSignalLevelToDisplay();
+	//removeTransmittingText();
 	digitalWrite(BUTTON_LED_PIN, HIGH);
 }
 
 void setEndMode() {
 	TIME time = getTime();
-	uint16_t timeCaptured = getTimeDiffInSeconds(time, startTime);
+	uint16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
 
 	if (currentTeam != NO_TEAM) {
 		score[currentTeam] += timeCaptured;
 	}
 
+	startTime = time;
 	digitalWrite(BUTTON_LED_PIN, LOW);
-	setResult();
+	//setResult();
 	setStatus(currentTeam, 1);
 	delay(300);
 	reportGameEnd(true);
 	currentTeam = NO_TEAM;
 	endModeSet = true;
-}
-
-void setResult() {
-	lcd.clear();
-
-	uint16_t points = score[0];
-	for (byte i = 1; i < NUMBER_OF_TEAMS; i++) {
-		if (score[i] > points) {
-			points = score[i];
-			currentTeam = i;
-		}
-	}
-
-	if (points > 0) {
-		setGlobalTeamString(currentTeam);
-		writeCurrentTeamLogoToDisplay();
-		lightUpTeamColour(currentTeam);
-		lcd.setFontSize(FONT_SIZE_SMALL);
-		lcd.setCursor((128 - (sizeof(winner) * 5)) / 2, 1);
-		lcd.print(FS(winner));
-		lcd.setCursor(20, 6);
-		lcd.setCursor((128 - ((sizeof(scoreText) + 3) * 5)) / 2, 6);
-		lcd.print(FS(scoreText));
-		lcd.printInt(points);
-	}
-	else {
-		currentTeam = NO_TEAM;
-		lcd.setFontSize(FONT_SIZE_SMALL);
-		lcd.setCursor((128 - ((sizeof(noWinner) + 4) * 5)) / 2, 4);
-		lcd.print(FS(noWinner));
-		printSignalLevelToDisplay();
-	}
 }
 
 void setStartTime(TIME now) {
@@ -687,7 +668,7 @@ void resetScore() {
 
 void setMaxScore() {
 	for (byte i = 0; i < NUMBER_OF_TEAMS; i++) {
-		score[i] = 99999;
+		score[i] = 65535;
 	}
 }
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
@@ -713,9 +694,11 @@ void setup() {
 	printSignalLevelToDisplay();
 
 	/*	Define Startup-State here: */
-
-	//setStandbyMode("");
-	setNeutralMode(true);
+	delay(1000);
+	setStandbyMode("");
+	delay(1000);
+	neutralizeDP();
+	//setNeutralMode(true);
 	/********************************/
 }
 
@@ -723,10 +706,9 @@ void setup() {
 ****************************    MAIN PROGRAM    ***********************************
 ************************************************************************************/
 void loop() {
-	//DEBUG_PRINT(F("freeMemory()="));
-	//DEBUG_PRINTLN(freeMemory());
 	globalTeamName = FS(noTeam);
 	setMaxScore();
+	// Ugly way to reserve mem for end game string. (?)
 	reportGameEnd(false);
 	resetScore();
 	while (1) {
@@ -743,7 +725,7 @@ void loop() {
 			if (goOnlineTimeIsSet && getTimeDiffInMinutes(goOnline, getTime()) < READY_TIME) {
 				state = READY;
 			}
-			delay(5000);
+			delay(3000);
 			break;
 		case READY:
 			timeLeft = getTimeDiffInMinutes(goOnline, getTime());
@@ -761,11 +743,12 @@ void loop() {
 			lcd.printInt(timeLeft);
 			lcd.print(timeLeft > 1 ? FS(minutesText) : FS(minuteText));
 			printSignalLevelToDisplay();
-			delay(10000);
+			delay(5000);
 			break;
 		case NEUTRAL:
 			handleButtons(getPressedButton());
 			if (++loopCounter > 50000) {
+				printSignalLevelToDisplay();
 				if (getTimeDiffInMinutes(stopTime, getTime()) < 1)
 					state = END;
 				loopCounter = 0;
@@ -774,6 +757,7 @@ void loop() {
 		case TAKEN:
 			handleButtons(getPressedButton());
 			if (++loopCounter > 50000) {
+				printSignalLevelToDisplay();
 				if (getTimeDiffInMinutes(stopTime, getTime()) < 1)
 					state = END;
 				loopCounter = 0;
@@ -784,13 +768,30 @@ void loop() {
 				setEndMode();
 				resetScore();
 			}
-			while (1) {
-				delay(5000);
+			setStandbyMode("");
+			break;
+		case KILLED:
+			TIME timeKilled = getTime();
+			uint16_t timeDiff = 0;
+			uint8_t goTime = READY_TIME;
+			DEBUG_PRINTLN(F("KILLED2"));
+			while (timeDiff < goTime) {
+				DEBUG_PRINTLN(timeDiff);
+				lcd.setCursor(0, 4);
+				lcd.setFontSize(FONT_SIZE_SMALL);
+				lcd.print(FS(onlineIn));
+				lcd.printInt((goTime - timeDiff));
+				lcd.print((goTime - timeDiff) > 1 ? FS(minutesText) : FS(minuteText));
+				printSignalLevelToDisplay();
+				delay(400);
 				if (checkForSMS(messageContent)) {
 					handleMessage(messageContent);
-					break;
 				}
+				timeDiff = getTimeDiffInMinutes(getTime(), timeKilled);
+				DEBUG_PRINTLN(timeDiff);
+				printSignalLevelToDisplay();
 			}
+			setNeutralMode(false);
 			break;
 		}
 	}
@@ -821,8 +822,9 @@ void initFONA(boolean startup) {
 	if (startup) { writeStatusTextToDisplay(FS(gsmFound)); }
 
 	flushFONA();
-	// Optionally configure a GPRS APN, username, and password.
+
 	fona.setGPRSNetworkSettings(F(APN));
+	fona.setHTTPSRedirect(false);
 
 
 	while (!fona.unlockSIM(PIN)) {
@@ -854,20 +856,19 @@ void initFONA(boolean startup) {
 	delay(1000);
 	while (!fona.enableGPRS(true)) {
 
-		delay(200);
+		delay(1000);
 	}
 	flushFONA();
 	fonaInitialized = true;
 
 	if (startup) {
 
-		for (int i = 0; i < 3; i++) {
+		for (int i = 0; i < 7; i++) {
 			fona.deleteSMS(i);
 		}
 	}
 
 	fona.enableRTC(1);
-	fona.enableNetworkTimeSync(true);
 
 	if (startup) { writeStatusTextToDisplay(FS(gsmFound)); }
 
@@ -876,9 +877,9 @@ void initFONA(boolean startup) {
 
 void reInitGPRS() {
 	fona.enableGPRS(false);
-	delay(400);
+	delay(200);
 	fona.enableGPRS(true);
-	delay(1000);
+	delay(500);
 }
 
 void setStatus(uint8_t teamId, uint8_t status) {
@@ -909,28 +910,31 @@ void reportGameEnd(boolean transmit) {
 
 void trySendData(const String & url, int8_t numberOfRetries, boolean tryToReboot) {
 	int8_t reInitCounter = numberOfRetries;
+	int8_t warningCounter = (numberOfRetries*2);
 	while (!sendData(url)) {
-		reInitGPRS();
-		if (!sendData(url)) {
-
-			if (--reInitCounter >= 0 && tryToReboot) {
-				initFONA(false);
-				delay(1000);
-			}
-			else {
+			if (reInitCounter-- <= 0 && tryToReboot) {
+				reInitGPRS();
 				break;
 			}
-		}
+			else {
+				delay(500);
+			}
+
+			if (warningCounter-- <= 0) {
+				// send sms????
+				DEBUG_PRINTLN("W!!");
+				break;
+			}
 	}
 
 	digitalWrite(LED_BUILTIN, HIGH);
 }
 
 boolean sendData(const String & url) {
-	char replybuffer[255];
+	delay(100);
+	char c;
 	uint16_t statuscode;
-	int16_t length;
-	uint8_t i = 0;
+	uint16_t length;
 
 	char urlToSend[115];
 	url.toCharArray(urlToSend, 115);
@@ -938,29 +942,12 @@ boolean sendData(const String & url) {
 	fona.flush();
 
 	if (!fona.HTTP_GET_start(urlToSend, &statuscode, reinterpret_cast<uint16_t*>(&length))) {
-		//DEBUG_PRINTLN(F("Failed! sendding"));
 		fona.flush();
 		return false;
 	}
 
-	while (length > 0) {
-		while (fona.available()) {
-			replybuffer[i++] = fona.read();
-
-			// Serial.write is too slow, we'll write directly to Serial register!
-#if defined(__AVR_ATmega328P__) || defined(__AVR_ATmega168__)
-			loop_until_bit_is_set(UCSR0A, UDRE0); /* Wait until data register empty. */
-			UDR0 = replybuffer[i - 1];
-#else
-			Serial.write(c);
-#endif
-			length--;
-			if (!length) break;
-		}
-	}
-
+	fona.flush();
 	fona.HTTP_GET_end();
-
 	fona.flush();
 
 	return statuscode == 200;
