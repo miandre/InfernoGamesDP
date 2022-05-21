@@ -19,7 +19,7 @@
 /*******************************************************************/
 
 #define DEFAULT_GAME_TIME 2
-#define READY_TIME 3
+#define READY_TIME 30
 
 #define LED_POWER_HIGH 255
 #define LED_POWER_LOW 100
@@ -40,6 +40,7 @@
 
 #define LED_COLOR_RED pixels.Color(LED_POWER_LOW, 0, 0)
 #define LED_COLOR_BLUE pixels.Color(0, 0, LED_POWER_LOW)
+#define LED_COLOR_YELLOW pixels.Color(LED_POWER_LOW, LED_POWER_LOW/2, 0)
 #define LED_COLOR_WHITE pixels.Color(255, 255, 255)
 #define LED_COLOR_WHITE_LOW pixels.Color(25, 25, 25)
 
@@ -110,6 +111,9 @@ uint16_t score[NUMBER_OF_TEAMS];
 TIME startTime;
 TIME goOnline;
 TIME stopTime;
+TIME lastReported;
+TIME now;
+TIME timeKilled;
 uint32_t loopCounter = 0;
 char fonaInBuffer[64];
 
@@ -133,6 +137,8 @@ const char PROGMEM statusQuery[] = { "&STATUS=" };
 const char PROGMEM watchdogURL[] = { "watchDog.php?ID=" };
 const char PROGMEM startURL[] = { "StartGame.php?ID=" };
 const char PROGMEM stopURL[] = { "StopGame.php?ID=" };
+const char PROGMEM scoreUrl[] = { "ReportScore.php?ID=" };
+const char PROGMEM killUrl[] = { "Kill.php?ID=" };
 
 const char PROGMEM bearsQuery[] = { "&BEARS=" };
 const char PROGMEM stfQuery[] = { "&STF=" };
@@ -362,7 +368,6 @@ void writeStatusTextToDisplay(String displayText) {
 }
 
 void handleButtons(byte pressedButton) {
-
 	if (pressedButton != currentTeam) {
 		switch (pressedButton)
 		{
@@ -381,11 +386,11 @@ void handleButtons(byte pressedButton) {
 
 boolean checkForSMS(char* smsbuff) {
 	if (fonaInitialized) {	
+
 		char* bufPtr = fonaInBuffer;    //handy buffer pointer
 		if (fona.available()) {     //any data available from the FONA?
 			uint8_t slot = 0;            //this will be the slot number of the SMS
 			uint8_t charCount = 0;
-
 			if ((state == STANDBY) || (state == READY)) {  //Because of junk in the buffer we need 2 versions.
 				uint8_t sanityCheck = 0;  // use to avoud inifinite loop
 				do {
@@ -437,16 +442,26 @@ TIME getTime() {
 }
 
 void setGoOnlineAndStopTime(const String & onlineTime) {
+	uint8_t hours = 23;
+	uint8_t minutes = 59;
+	uint8_t seconds = 59;
 	if (onlineTime.length() >= 8) {
-		uint8_t hours = onlineTime.substring(0, 2).toInt();
-		uint8_t minutes = onlineTime.substring(3, 5).toInt();
-		uint8_t seconds = onlineTime.substring(6, 8).toInt();
-		goOnline.hours = hours;
-		goOnline.minutes = minutes;
-		goOnline.seconds = seconds;
-		setStopTime(((hours + DEFAULT_GAME_TIME)%24), minutes, seconds);
-		goOnlineTimeIsSet = true;
+		hours = onlineTime.substring(0, 2).toInt();
+		minutes = onlineTime.substring(3, 5).toInt();
+		seconds = onlineTime.substring(6, 8).toInt();
+	}else {
+		char buffer[23];
+		fona.getTime(buffer, 23);
+		String time = String(buffer).substring(10);
+		hours = time.substring(0, 2).toInt();
+		minutes = time.substring(3, 5).toInt() + 1;
+		seconds = time.substring(6, 8).toInt();
 	}
+	goOnline.hours = hours;
+	goOnline.minutes = minutes;
+	goOnline.seconds = seconds;
+	setStopTime(((hours + DEFAULT_GAME_TIME)%24), minutes, seconds);
+	goOnlineTimeIsSet = true;
 }
 
 void setStopTime(const uint8_t & hours, const uint8_t & minutes, const uint8_t & seconds) {
@@ -489,6 +504,13 @@ void handleMessage(char* smsbuff) {
 	else if (message.startsWith(F("CHECK"))) {
 		setAlive(true);
 	}
+	else if (message.startsWith(F("KILL"))) {
+		neutralizeDP();
+	}
+	else if (message.startsWith(F("SCORE"))) {
+		reportScore();
+	}
+	// TODO testa score, fixa DP med antal "killed"
 }
 
 void displayTransmittingText() {
@@ -515,7 +537,9 @@ void setStandbyMode(const String & onlineTime) {
 	state = STANDBY;
 	endModeSet = false;
 	standByModeIsSet = true;
-	setGoOnlineAndStopTime(onlineTime);
+	if (onlineTime.length() >= 8) {
+		setGoOnlineAndStopTime(onlineTime);
+	}
 	setStatus(NO_TEAM, 3);
 	lcd.clear();
 	lcd.backlight(false);
@@ -539,33 +563,37 @@ void setReadyMode(const String & onlineTime) {
 	lcd.draw(logo, 64, 64);
 	pixels.clear();
 	pixels.show();
-	digitalWrite(BUTTON_LED_PIN, HIGH);
+	digitalWrite(BUTTON_LED_PIN, LOW);
 }
 
 void neutralizeDP(){
-	TIME time = getTime();
-	uint16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
+	if (state == TAKEN) {
+		TIME time = getTime();
+		uint16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
 
-	if (currentTeam != NO_TEAM) {
-		score[currentTeam] += timeCaptured;
+		if (currentTeam != NO_TEAM) {
+			score[currentTeam] += timeCaptured;
+		}
+		startTime = time;
+		timeKilled = time;
+		pixels.fill(LED_COLOR_YELLOW, 0, 8);
+		pixels.show();
+		digitalWrite(BUTTON_LED_PIN, LOW);
+		lcd.clear();
+		lcd.setFontSize(FONT_SIZE_SMALL);
+		lcd.setCursor((128 - ((sizeof(neutralizing) + 4) * 5)) / 2, 4);
+		lcd.print(FS(neutralizing));
+		printTransmittingInfo();
+		state = KILLED;
+		currentTeam = NO_TEAM;
+		endModeSet = false;
+		reportKilled();
+		setStatus(NO_TEAM, 2);
+		lcd.clear();
+		lcd.setFontSize(FONT_SIZE_SMALL);
+		lcd.setCursor((128 - ((sizeof(neutralized) + 4) * 5)) / 2, 4);
+		lcd.print(FS(neutralized));
 	}
-	startTime = time;
-
-	lcd.clear();
-	lcd.setFontSize(FONT_SIZE_SMALL);
-	lcd.setCursor((128 - ((sizeof(neutralizing) + 4) * 5)) / 2, 4);
-	lcd.print(FS(neutralizing));
-	printTransmittingInfo();
-
-	state = KILLED;
-	currentTeam = NO_TEAM;
-	endModeSet = false;
-	setStatus(NO_TEAM, 2);
-	DEBUG_PRINT(F("KILLED1"));
-	lcd.clear();
-	lcd.setFontSize(FONT_SIZE_SMALL);
-	lcd.setCursor((128 - ((sizeof(neutralized) + 4) * 5)) / 2, 4);
-	lcd.print(FS(neutralized));
 }
 
 void setNeutralMode(boolean shouldResetScore) {
@@ -613,7 +641,6 @@ void setTakenMode(byte team) {
 
 	writeCurrentTeamLogoToDisplay();
 	printSignalLevelToDisplay();
-	//removeTransmittingText();
 	digitalWrite(BUTTON_LED_PIN, HIGH);
 }
 
@@ -627,12 +654,24 @@ void setEndMode() {
 
 	startTime = time;
 	digitalWrite(BUTTON_LED_PIN, LOW);
-	//setResult();
 	setStatus(currentTeam, 1);
 	delay(300);
 	reportGameEnd(true);
 	currentTeam = NO_TEAM;
 	endModeSet = true;
+	readyModeSet = false;
+}
+
+void reportScore() {
+	if (currentTeam != NO_TEAM) {
+		uint16_t timeCaptured = getTimeDiffInMinutes(getTime(), startTime);
+		score[currentTeam] += timeCaptured;
+		startTime = getTime();
+	}
+	lastReported = getTime();
+	const String url = URL_BASE + FS(scoreUrl) + ID + FS(stfQuery) + score[STF] + FS(bearsQuery) + score[BEARS];
+	DEBUG_PRINTLN(url);
+	trySendData(url, 2, true);
 }
 
 void setStartTime(TIME now) {
@@ -692,13 +731,11 @@ void setup() {
 	lcd.clear();
 	lcd.setCursor(0, 0);
 	printSignalLevelToDisplay();
+	lastReported = getTime();
+	delay(1000);
 
 	/*	Define Startup-State here: */
-	delay(1000);
 	setStandbyMode("");
-	delay(1000);
-	neutralizeDP();
-	//setNeutralMode(true);
 	/********************************/
 }
 
@@ -733,6 +770,7 @@ void loop() {
 				setReadyMode("");
 			}
 			if (timeLeft < 1) {
+				lastReported = getTime();
 				setNeutralMode(true);
 				break;
 			}
@@ -749,8 +787,13 @@ void loop() {
 			handleButtons(getPressedButton());
 			if (++loopCounter > 50000) {
 				printSignalLevelToDisplay();
-				if (getTimeDiffInMinutes(stopTime, getTime()) < 1)
+				now = getTime();
+				if (getTimeDiffInMinutes(now, lastReported) > READY_TIME) {
+					reportScore();
+				}
+				if (getTimeDiffInMinutes(stopTime, now) < 1) {
 					state = END;
+				}
 				loopCounter = 0;
 			}
 			break;
@@ -758,8 +801,13 @@ void loop() {
 			handleButtons(getPressedButton());
 			if (++loopCounter > 50000) {
 				printSignalLevelToDisplay();
-				if (getTimeDiffInMinutes(stopTime, getTime()) < 1)
+				now = getTime();
+				if (getTimeDiffInMinutes(now, lastReported) > READY_TIME) {
+					reportScore();
+				}
+				if (getTimeDiffInMinutes(stopTime, now) < 1) {
 					state = END;
+				}
 				loopCounter = 0;
 			}
 			break;
@@ -771,27 +819,27 @@ void loop() {
 			setStandbyMode("");
 			break;
 		case KILLED:
-			TIME timeKilled = getTime();
-			uint16_t timeDiff = 0;
-			uint8_t goTime = READY_TIME;
-			DEBUG_PRINTLN(F("KILLED2"));
-			while (timeDiff < goTime) {
-				DEBUG_PRINTLN(timeDiff);
+			timeLeft = 0;
+			if (++loopCounter > 50000) {
+				now = getTime();
 				lcd.setCursor(0, 4);
 				lcd.setFontSize(FONT_SIZE_SMALL);
 				lcd.print(FS(onlineIn));
-				lcd.printInt((goTime - timeDiff));
-				lcd.print((goTime - timeDiff) > 1 ? FS(minutesText) : FS(minuteText));
+				lcd.printInt((READY_TIME - timeLeft));
+				lcd.print((READY_TIME - timeLeft) > 1 ? FS(minutesText) : FS(minuteText));
 				printSignalLevelToDisplay();
-				delay(400);
-				if (checkForSMS(messageContent)) {
-					handleMessage(messageContent);
+				timeLeft = getTimeDiffInMinutes(now, timeKilled);
+
+				if (getTimeDiffInMinutes(now, timeKilled) > READY_TIME) {
+					setNeutralMode(false);
 				}
-				timeDiff = getTimeDiffInMinutes(getTime(), timeKilled);
-				DEBUG_PRINTLN(timeDiff);
-				printSignalLevelToDisplay();
+
+				if (getTimeDiffInMinutes(stopTime, now) < 1) {
+					state = END;
+				}
+
+				loopCounter = 0;
 			}
-			setNeutralMode(false);
 			break;
 		}
 	}
@@ -892,6 +940,12 @@ void setStatus(uint8_t teamId, uint8_t status) {
 void setAlive(boolean tryToReboot) {
 	const String url = URL_BASE + FS(watchdogURL) + ID;
 	trySendData(url, 2, tryToReboot);
+}
+
+void reportKilled() {
+	const String url = URL_BASE + FS(killUrl) + ID + FS(teamQuery) + globalTeamName;
+	DEBUG_PRINTLN(url);
+	trySendData(url, 2, true);
 }
 
 void reportGameStart() {
