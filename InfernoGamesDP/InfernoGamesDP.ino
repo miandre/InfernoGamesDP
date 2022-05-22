@@ -15,7 +15,7 @@
 #include "InfernoGamesDP.h"
 
 /**************************DP-ID****************************************/
-#define ID 4
+#define ID 1
 /*******************************************************************/
 
 #define DEFAULT_GAME_TIME 2
@@ -107,7 +107,8 @@ boolean resetState = false;
 boolean resetReported = true;
 char PIN[5] = "1234";
 const String URL_BASE = "http://www.geeks.terminalprospect.com/AIR/";
-uint16_t score[NUMBER_OF_TEAMS];
+int16_t score[NUMBER_OF_TEAMS];
+uint8_t destroyed[NUMBER_OF_TEAMS];
 TIME startTime;
 TIME goOnline;
 TIME stopTime;
@@ -156,6 +157,7 @@ const char PROGMEM minutesText[] = { " minutes." };
 const char PROGMEM minuteText[] = { " minute." };
 const char PROGMEM blankRow[] = { "                       " };
 
+char messageContent[30];
 
 String globalTeamName;
 String globalTeamColor;
@@ -206,18 +208,13 @@ const byte logo[] PROGMEM = {
 	0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x9f, 0x80, 0xc0, 0xff
 };
 
-char messageContent[30];
 
-//uint16_t getTimeDiffInMinutes(struct TIME stop, struct TIME start) {
-//	return getTimeDiffInSeconds(stop, start) / 60;
-//}
-
-uint16_t getTimeDiffInMinutes(struct TIME stop, struct TIME start) {
+int16_t getTimeDiffInMinutes(struct TIME stop, struct TIME start) {
 	if (stop.seconds < start.seconds) {
 		--stop.minutes;
 		stop.seconds += 60;
 	}
-	if (stop.minutes < start.minutes) {
+	if (stop.minutes < start.minutes) { 
 		--stop.hours;
 		stop.minutes += 60;
 	}
@@ -225,11 +222,11 @@ uint16_t getTimeDiffInMinutes(struct TIME stop, struct TIME start) {
 		stop.hours += 24;
 	}
 
-	uint8_t hourDiff = stop.hours - start.hours;
-	uint8_t minDiff = stop.minutes - start.minutes;
-	uint8_t secDiff = stop.seconds - start.seconds;
+	int8_t hourDiff = stop.hours - start.hours;
+	int8_t minDiff = stop.minutes - start.minutes;
+	int8_t secDiff = stop.seconds - start.seconds;
 
-	return  ((hourDiff * 60) + (minDiff) + (secDiff > 30 ? 1 : 0));
+	return  (hourDiff >= 23 ? -1 : (hourDiff * 60) + (minDiff) + (secDiff > 30 ? 1 : 0));
 }
 
 void setupDisplay() {
@@ -454,7 +451,7 @@ void setGoOnlineAndStopTime(const String & onlineTime) {
 		fona.getTime(buffer, 23);
 		String time = String(buffer).substring(10);
 		hours = time.substring(0, 2).toInt();
-		minutes = time.substring(3, 5).toInt() + 1;
+		minutes = time.substring(3, 5).toInt();
 		seconds = time.substring(6, 8).toInt();
 	}
 	goOnline.hours = hours;
@@ -537,6 +534,7 @@ void setStandbyMode(const String & onlineTime) {
 	state = STANDBY;
 	endModeSet = false;
 	standByModeIsSet = true;
+	goOnlineTimeIsSet = false;
 	if (onlineTime.length() >= 8) {
 		setGoOnlineAndStopTime(onlineTime);
 	}
@@ -569,10 +567,11 @@ void setReadyMode(const String & onlineTime) {
 void neutralizeDP(){
 	if (state == TAKEN) {
 		TIME time = getTime();
-		uint16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
+		int16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
 
 		if (currentTeam != NO_TEAM) {
 			score[currentTeam] += timeCaptured;
+			destroyed[currentTeam]++;
 		}
 		startTime = time;
 		timeKilled = time;
@@ -620,7 +619,7 @@ void setTakenMode(byte team) {
 	TIME time = getTime();
 
 	if (currentTeam != NO_TEAM) {
-		uint16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
+		int16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
 		score[currentTeam] += timeCaptured;
 		startTime = time;
 	}
@@ -646,7 +645,7 @@ void setTakenMode(byte team) {
 
 void setEndMode() {
 	TIME time = getTime();
-	uint16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
+	int16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
 
 	if (currentTeam != NO_TEAM) {
 		score[currentTeam] += timeCaptured;
@@ -660,11 +659,12 @@ void setEndMode() {
 	currentTeam = NO_TEAM;
 	endModeSet = true;
 	readyModeSet = false;
+	goOnlineTimeIsSet = false;
 }
 
 void reportScore() {
 	if (currentTeam != NO_TEAM) {
-		uint16_t timeCaptured = getTimeDiffInMinutes(getTime(), startTime);
+		int16_t timeCaptured = getTimeDiffInMinutes(getTime(), startTime);
 		score[currentTeam] += timeCaptured;
 		startTime = getTime();
 	}
@@ -702,12 +702,13 @@ void printSignalLevelToDisplay() {
 void resetScore() {
 	for (byte i = 0; i < NUMBER_OF_TEAMS; i++) {
 		score[i] = 0;
+		destroyed[i] = 0;
 	}
 }
 
 void setMaxScore() {
 	for (byte i = 0; i < NUMBER_OF_TEAMS; i++) {
-		score[i] = 65535;
+		score[i] = 32000;
 	}
 }
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
@@ -752,7 +753,7 @@ void loop() {
 		if (checkForSMS(messageContent)) {
 			handleMessage(messageContent);
 		}
-		uint16_t timeLeft = 0;
+		int16_t timeLeft = 0;
 		switch (state) {
 		case STANDBY:
 			if (!standByModeIsSet) {
@@ -769,7 +770,7 @@ void loop() {
 			if (!readyModeSet && timeLeft <= READY_TIME) {
 				setReadyMode("");
 			}
-			if (timeLeft < 1) {
+			if (timeLeft <= 0) {
 				lastReported = getTime();
 				setNeutralMode(true);
 				break;
@@ -791,7 +792,7 @@ void loop() {
 				if (getTimeDiffInMinutes(now, lastReported) > READY_TIME) {
 					reportScore();
 				}
-				if (getTimeDiffInMinutes(stopTime, now) < 1) {
+				if (getTimeDiffInMinutes(stopTime, now) <= 0) {
 					state = END;
 				}
 				loopCounter = 0;
@@ -805,7 +806,7 @@ void loop() {
 				if (getTimeDiffInMinutes(now, lastReported) > READY_TIME) {
 					reportScore();
 				}
-				if (getTimeDiffInMinutes(stopTime, now) < 1) {
+				if (getTimeDiffInMinutes(stopTime, now) <= 0) {
 					state = END;
 				}
 				loopCounter = 0;
@@ -819,22 +820,25 @@ void loop() {
 			setStandbyMode("");
 			break;
 		case KILLED:
-			timeLeft = 0;
 			if (++loopCounter > 50000) {
 				now = getTime();
-				lcd.setCursor(0, 4);
+				timeLeft = getTimeDiffInMinutes(now, timeKilled);
+				lcd.setCursor(0, 6);
 				lcd.setFontSize(FONT_SIZE_SMALL);
 				lcd.print(FS(onlineIn));
 				lcd.printInt((READY_TIME - timeLeft));
 				lcd.print((READY_TIME - timeLeft) > 1 ? FS(minutesText) : FS(minuteText));
 				printSignalLevelToDisplay();
-				timeLeft = getTimeDiffInMinutes(now, timeKilled);
+				
+				if (getTimeDiffInMinutes(now, lastReported) > READY_TIME) {
+					reportScore();
+				}
 
 				if (getTimeDiffInMinutes(now, timeKilled) > READY_TIME) {
 					setNeutralMode(false);
 				}
 
-				if (getTimeDiffInMinutes(stopTime, now) < 1) {
+				if (getTimeDiffInMinutes(stopTime, now) <= 0) {
 					state = END;
 				}
 
@@ -943,7 +947,7 @@ void setAlive(boolean tryToReboot) {
 }
 
 void reportKilled() {
-	const String url = URL_BASE + FS(killUrl) + ID + FS(teamQuery) + globalTeamName;
+	const String url = URL_BASE + FS(killUrl) + ID + FS(stfQuery) + destroyed[STF] + FS(bearsQuery) + destroyed[BEARS];
 	DEBUG_PRINTLN(url);
 	trySendData(url, 2, true);
 }
