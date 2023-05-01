@@ -681,8 +681,9 @@ void setStartTime(TIME now) {
 }
 
 void printSignalLevelToDisplay() {
+	lcd.setFontSize(FONT_SIZE_SMALL);
 	uint8_t n = fona.getRSSI();
-
+	TIME time = getTime();
 	if (n == 0) {
 		lcd.setCursor(0, 0);
 		lcd.draw(transmition[0], 16, 8);
@@ -696,7 +697,18 @@ void printSignalLevelToDisplay() {
 		lcd.setCursor(0, 0);
 		lcd.draw(transmition[i], 16, 8);
 	}
+	
+	lcd.setCursor(98, 0);
+	if (time.hours <= 9) {
+		lcd.print(0);
+	}
 
+	lcd.print(time.hours);
+	lcd.print(":");
+	if (time.minutes <= 9) {
+		lcd.print(0);
+	}
+	lcd.print(time.minutes);
 }
 
 void resetScore() {
