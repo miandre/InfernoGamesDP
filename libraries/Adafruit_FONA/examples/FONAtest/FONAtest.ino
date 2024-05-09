@@ -810,23 +810,23 @@ void loop() {
         break;
       }
 
-//	case 'D': {
-//
-//		//flushSerial();
-//		//char data[80];
-//		//Serial.println(F("Enter AT Command: "));
-//		//readline(data, 79);
-//		String response = sendATCommand("AT+CPIN?");
-//		//Serial.println("resp " +response);
-//		break;
-//	}
-//	case 'Q': {
-//
-//		flushSerial();
-//		String response = sendATCommand("AT+CPWD=\"SC\",\"3014\",\"1234\"");
-//		Serial.println(response);
-//		break;
-//	}
+	case 'D': {
+
+		flushSerial();
+		char data[80];
+		Serial.println(F("Enter AT Command: "));
+		readline(data, 79);
+		String response = sendATCommand("AT+CPIN?");
+		Serial.println("resp " +response);
+		break;
+	}
+	case 'Q': {
+
+		flushSerial();
+		String response = sendATCommand("AT+CPWD=\"SC\",\"9046\",\"1234\"");
+		Serial.println(response);
+		break;
+	}
 
     default: {
         Serial.println(F("Unknown command"));
