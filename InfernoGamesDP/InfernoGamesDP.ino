@@ -15,7 +15,7 @@
 #include "InfernoGamesDP.h"
 
 /**************************DP-ID****************************************/
-#define ID 4
+#define ID 1
 /*******************************************************************/
 
 #define DEFAULT_GAME_TIME 7
@@ -35,9 +35,6 @@
 #define NUMBER_OF_TEAMS 3
 
 #define NO_TEAM 99
-#define TBT 0
-#define LEG 1
-#define TFB 2
 #define NA 3
 
 #define LED_COLOR_RED pixels.Color(LED_POWER_LOW, 0, 0)
@@ -122,9 +119,6 @@ uint32_t loopCounter = 0;
 char fonaInBuffer[64];
 
 #define FS(x) (__FlashStringHelper*)(x)
-const char leg[]  PROGMEM = { "LEG" };
-const char tbt[]  PROGMEM = { "TBT" };
-const char tfb[]  PROGMEM = { "TFB" };
 const char noTeam[]  PROGMEM = { "NOTEAM" };
 
 const char PROGMEM red[] = { "RED" };
@@ -132,10 +126,10 @@ const char PROGMEM blue[] = { "BLUE" };
 const char PROGMEM green[] = { "GREEN" };
 const char PROGMEM black[] = { "BLACK" };;
 
-const char PROGMEM initializing[] = { "Initializing" };
+const char PROGMEM initializing[] = { "Init..." };
 const char PROGMEM simOk[] = { "SIM OK" };
-const char PROGMEM gsmFound[] = { "GSM module found" };
-const char PROGMEM networkFound[] = { "Network found" };
+const char PROGMEM gsmFound[] = { "GSM module OK" };
+const char PROGMEM networkFound[] = { "Network OK" };
 
 const char PROGMEM statusURL[] = { "US.php?ID=" };
 const char PROGMEM teamQuery[] = { "&TEAM=" };
@@ -146,9 +140,9 @@ const char PROGMEM stopURL[] = { "StopGame.php?ID=" };
 const char PROGMEM scoreUrl[] = { "ReportScore.php?ID=" };
 const char PROGMEM killUrl[] = { "Kill.php?ID=" };
 
-const char PROGMEM tbtQuery[] = { "&TBT=" };
-const char PROGMEM legQuery[] = { "&LEG=" };
-const char PROGMEM tfbQuery[] = { "&TFB=" };
+const char PROGMEM redQuery[] = { "&RED=" };
+const char PROGMEM blueQuery[] = { "&BLUE=" };
+const char PROGMEM greenQuery[] = { "&GREEN=" };
 
 const char PROGMEM winner[] = { "WINNER" };
 const char PROGMEM scoreText[] = { "Score:   " };
@@ -318,14 +312,14 @@ void setGlobalTeamString(const byte & team)
 {
 	switch (team)
 	{
-	case TBT:
-		globalTeamName = FS(tbt);
+	case RED:
+		globalTeamName = FS(red);
 		break;
-	case LEG:
-		globalTeamName = FS(leg);
+	case BLUE:
+		globalTeamName = FS(blue);
 		break;
-	case TFB:
-		globalTeamName = FS(tfb);
+	case GREEN:
+		globalTeamName = FS(green);
 		break;
 	}
 }
@@ -334,13 +328,13 @@ void lightUpTeamColour(byte team) {
 	uint32_t ledColor;
 	switch (team)
 	{
-	case TBT:
+	case RED:
 		ledColor = LED_COLOR_RED;
 		break;
-	case LEG:
+	case BLUE:
 		ledColor = LED_COLOR_BLUE;
 		break;
-	case TFB:
+	case GREEN:
 		ledColor = LED_COLOR_GREEN;
 		break;
 	case NO_TEAM:
@@ -352,20 +346,21 @@ void lightUpTeamColour(byte team) {
 }
 
 byte getTeamIdFromName(const String & team) {
-	if (team.equalsIgnoreCase(FS(tbt))) return TBT;
-	if (team.equalsIgnoreCase(FS(leg))) return LEG;
+	if (team.equalsIgnoreCase(FS(red))) return RED;
+	if (team.equalsIgnoreCase(FS(blue))) return BLUE;
+	if (team.equalsIgnoreCase(FS(green))) return GREEN;
 }
 
 void setCurrentTeamColor(byte team) {
 	switch (team)
 	{
-	case TBT:
+	case RED:
 		globalTeamColor = FS(red);
 		break;
-	case LEG:
+	case BLUE:
 		globalTeamColor = FS(blue);
 		break;
-	case TFB:
+	case GREEN:
 		globalTeamColor = FS(green);
 		break;
 	case NO_TEAM:
@@ -384,16 +379,16 @@ void handleButtons(byte pressedButton) {
 		switch (pressedButton)
 		{
 		case RED:
-			setTakenMode(TBT);
+			setTakenMode(RED);
 			break;
 		case YELLOW:
 			neutralizeDP();
 			break;
 		case BLUE:
-			setTakenMode(LEG);
+			setTakenMode(BLUE);
 			break;
 		case GREEN:
-			setTakenMode(TFB);
+			setTakenMode(GREEN);
 			break;
 		}
 	}
@@ -525,7 +520,6 @@ void handleMessage(char* smsbuff) {
 	else if (message.startsWith(F("SCORE"))) {
 		reportScore();
 	}
-	// TODO testa score, fixa DP med antal "killed"
 }
 
 void displayTransmittingText() {
@@ -687,7 +681,7 @@ void reportScore() {
 		startTime = getTime();
 	}
 	lastReported = getTime();
-	const String url = URL_BASE + FS(scoreUrl) + ID + FS(legQuery) + score[LEG] + FS(tbtQuery) + score[TBT] + FS(tfbQuery) + score[TFB];
+	const String url = URL_BASE + FS(scoreUrl) + ID + FS(blueQuery) + score[BLUE] + FS(redQuery) + score[RED] + FS(greenQuery) + score[GREEN];
 	DEBUG_PRINTLN(url);
 	trySendData(url, 2, true);
 }
@@ -977,7 +971,7 @@ void setAlive(boolean tryToReboot) {
 }
 
 void reportKilled() {
-	const String url = URL_BASE + FS(killUrl) + ID + FS(legQuery) + destroyed[LEG] + FS(tbtQuery) + destroyed[TBT] + FS(tfbQuery) + destroyed[TFB];
+	const String url = URL_BASE + FS(killUrl) + ID + FS(blueQuery) + destroyed[BLUE] + FS(redQuery) + destroyed[RED] + FS(greenQuery) + destroyed[GREEN];
 	DEBUG_PRINTLN(url);
 	trySendData(url, 2, true);
 }
@@ -989,7 +983,7 @@ void reportGameStart() {
 }
 
 void reportGameEnd(boolean transmit) {
-	const String url = URL_BASE + FS(stopURL) + ID  + FS(legQuery) + score[LEG] + FS(tbtQuery) + score[TBT] + FS(tfbQuery) + score[TFB];
+	const String url = URL_BASE + FS(stopURL) + ID  + FS(blueQuery) + score[BLUE] + FS(redQuery) + score[RED] + FS(greenQuery) + score[GREEN];
 	DEBUG_PRINTLN(url);
 	if (transmit) {
 		trySendData(url, 2, true);
@@ -1007,12 +1001,6 @@ void trySendData(const String & url, int8_t numberOfRetries, boolean tryToReboot
 			else {
 				delay(500);
 			}
-
-			//if (warningCounter-- <= 0) {
-			//	// send sms????
-			//	DEBUG_PRINTLN("W!!");
-			//	break;
-			//}
 	}
 
 	digitalWrite(LED_BUILTIN, HIGH);
