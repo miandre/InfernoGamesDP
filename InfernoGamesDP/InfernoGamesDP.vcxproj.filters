@@ -15,9 +15,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="InfernoGamesDP.ino" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="__vm\.InfernoGamesDP.vsarduino.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -32,5 +29,6 @@
     <ClCompile Include="IOFunctions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="InfernoGamesDP.ino" />
   </ItemGroup>
 </Project>
