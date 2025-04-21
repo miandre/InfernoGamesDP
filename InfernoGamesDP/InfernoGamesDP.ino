@@ -18,7 +18,7 @@
 #define ID 4
 /*******************************************************************/
 
-#define DEFAULT_GAME_TIME 2
+#define DEFAULT_GAME_TIME 7
 #define READY_TIME 30
 
 #define LED_POWER_HIGH 255
