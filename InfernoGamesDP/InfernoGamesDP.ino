@@ -119,7 +119,7 @@ uint32_t loopCounter = 0;
 char fonaInBuffer[64];
 
 #define FS(x) (__FlashStringHelper*)(x)
-const char noTeam[]  PROGMEM = { "NOTEAM" };
+const char noTeam[]  PROGMEM = { "NO" };
 
 const char PROGMEM red[] = { "RED" };
 const char PROGMEM blue[] = { "BLUE" };
@@ -140,9 +140,9 @@ const char PROGMEM stopURL[] = { "StopGame.php?ID=" };
 const char PROGMEM scoreUrl[] = { "ReportScore.php?ID=" };
 const char PROGMEM killUrl[] = { "Kill.php?ID=" };
 
-const char PROGMEM redQuery[] = { "&RED=" };
-const char PROGMEM blueQuery[] = { "&BLUE=" };
-const char PROGMEM greenQuery[] = { "&GREEN=" };
+const char PROGMEM redQuery[] = { "&R=" };
+const char PROGMEM blueQuery[] = { "&B=" };
+const char PROGMEM greenQuery[] = { "&G=" };
 
 const char PROGMEM winner[] = { "WINNER" };
 const char PROGMEM scoreText[] = { "Score:   " };
@@ -153,8 +153,7 @@ const char PROGMEM capturing[] = { " capturing!" };
 const char PROGMEM transmitting[] = { "Transmitting status" };
 const char PROGMEM standBy[] = { "Please stand by" };
 const char PROGMEM onlineIn[] = { "Online in " };
-const char PROGMEM minutesText[] = { " minutes." };
-const char PROGMEM minuteText[] = { " minute." };
+const char PROGMEM minuteText[] = { " min." };
 const char PROGMEM blankRow[] = { "                       " };
 
 char messageContent[30];
@@ -499,7 +498,7 @@ void handleMessage(char* smsbuff) {
 		neutralizeDP();
 	}
 	else if (message.startsWith(F("NEUTRAL"))) {
-		setNeutralMode(true);
+		setNeutralMode(false);
 	}
 	else if (message.startsWith(F("TAKEN"))) {
 		setTakenMode(getTeamIdFromName(message.substring(6)));
@@ -629,7 +628,6 @@ void setNeutralMode(boolean shouldResetScore) {
 void setTakenMode(byte team) {
 	endModeSet = false;
 	TIME time = getTime();
-
 	if (currentTeam != NO_TEAM) {
 		int16_t timeCaptured = getTimeDiffInMinutes(time, startTime);
 		score[currentTeam] += timeCaptured;
@@ -667,23 +665,11 @@ void setEndMode() {
 	digitalWrite(BUTTON_LED_PIN, LOW);
 	setStatus(currentTeam, 1);
 	delay(300);
-	reportGameEnd(true);
 	currentTeam = NO_TEAM;
+	reportGameEnd(true);
 	endModeSet = true;
 	readyModeSet = false;
 	goOnlineTimeIsSet = false;
-}
-
-void reportScore() {
-	if (currentTeam != NO_TEAM) {
-		int16_t timeCaptured = getTimeDiffInMinutes(getTime(), startTime);
-		score[currentTeam] += timeCaptured;
-		startTime = getTime();
-	}
-	lastReported = getTime();
-	const String url = URL_BASE + FS(scoreUrl) + ID + FS(blueQuery) + score[BLUE] + FS(redQuery) + score[RED] + FS(greenQuery) + score[GREEN];
-	DEBUG_PRINTLN(url);
-	trySendData(url, 2, true);
 }
 
 void setStartTime(TIME now) {
@@ -804,7 +790,7 @@ void loop() {
 			lcd.setFontSize(FONT_SIZE_SMALL);
 			lcd.print(FS(onlineIn));
 			lcd.printInt(timeLeft);
-			lcd.print(timeLeft > 1 ? FS(minutesText) : FS(minuteText));
+			lcd.print(FS(minuteText));
 			printSignalLevelToDisplay();
 			delay(5000);
 			break;
@@ -851,7 +837,7 @@ void loop() {
 				lcd.setFontSize(FONT_SIZE_SMALL);
 				lcd.print(FS(onlineIn));
 				lcd.printInt((READY_TIME - timeLeft));
-				lcd.print((READY_TIME - timeLeft) > 1 ? FS(minutesText) : FS(minuteText));
+				lcd.print(FS(minuteText));
 				printSignalLevelToDisplay();
 				
 				if (getTimeDiffInMinutes(now, lastReported) > READY_TIME) {
@@ -961,6 +947,18 @@ void reInitGPRS() {
 void setStatus(uint8_t teamId, uint8_t status) {
 	setCurrentTeamColor(teamId);
 	const String url = URL_BASE + FS(statusURL) + ID + FS(teamQuery) + globalTeamColor + FS(statusQuery) + status;
+	DEBUG_PRINTLN(url);
+	trySendData(url, 2, true);
+}
+
+void reportScore() {
+	if (currentTeam != NO_TEAM) {
+		int16_t timeCaptured = getTimeDiffInMinutes(getTime(), startTime);
+		score[currentTeam] += timeCaptured;
+		startTime = getTime();
+	}
+	lastReported = getTime();
+	const String url = URL_BASE + FS(scoreUrl) + ID + FS(blueQuery) + score[BLUE] + FS(redQuery) + score[RED] + FS(greenQuery) + score[GREEN];
 	DEBUG_PRINTLN(url);
 	trySendData(url, 2, true);
 }
